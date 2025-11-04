@@ -288,13 +288,14 @@ class LLMHandler:
                 
         raise ValueError("无法解析LLM返回的优化后插件元数据")
         
-    async def generate_plugin_code(self, metadata: Dict[str, Any], 
-                                 markdown: str) -> str:
+    async def generate_plugin_code(self, metadata: Dict[str, Any],
+                                 markdown: str, config_schema: str = "") -> str:
         """生成插件代码
         
         Args:
             metadata: 插件元数据
             markdown: Markdown文档
+            config_schema: 配置文件内容
             
         Returns:
             str: 插件代码
@@ -312,11 +313,18 @@ class LLMHandler:
 3. 包含必要的错误处理
 4. 代码要有良好的注释
 5. 确保生成的内容符合反向提示词要求：{self.negative_prompt}
+6. 如果有配置文件，必须在插件的__init__方法中正确接收和使用config参数
+7. 配置项的使用示例：self.config.get("配置项名", "默认值")
+
+配置文件内容（如果有）：
+```json
+{config_schema}
+```
 
 请直接返回Python代码，包含在``python和```之间。"""
 
         metadata_str = json.dumps(metadata, ensure_ascii=False, indent=2)
-        prompt = f"请根据以下插件元数据和Markdown文档生成插件代码：\n\n元数据：\n{metadata_str}\n\n文档：\n{metadata}"
+        prompt = f"请根据以下插件元数据和Markdown文档生成插件代码：\n\n元数据：\n{metadata_str}\n\n文档：\n{markdown}"
         
         response = await self.call_llm(prompt, system_prompt)
         
