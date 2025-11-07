@@ -507,7 +507,7 @@ class LLMHandler:
 - 60-69分：较差，有较多问题需要修复，需要重大修改
 - 0-59分：不合格，存在严重安全问题或功能缺失，需要重新生成
 
-重要：如果发现任何安全问题或违反反向提示词要求，必须将 approved 设置为 false，并给出详细的问题描述。"""
+重要：如果发现任何无法运行的问题或违反反向提示词要求，必须将 approved 设置为 false，并给出详细的问题描述。"""
 
         prompt = f"请审查以下插件代码：\n\n代码：\n{code}\n\n元数据：\n{json.dumps(metadata, ensure_ascii=False, indent=2)}\n\n文档：\n{metadata}"
         
