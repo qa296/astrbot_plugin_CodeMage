@@ -186,6 +186,64 @@ class PluginInstaller:
                 "error": str(e)
             }
             
+    async def uninstall_plugin(self, plugin_name: str) -> Dict[str, Any]:
+        """尝试卸载已安装的插件并删除其目录（通过API）。
+        
+        由于 AstrBot 的管理 API 可能存在不同实现，下面会尝试多种常见的卸载端点，
+        并在失败时给出尽可能详尽的日志，但不会抛出异常中断流程。
+        
+        Args:
+            plugin_name: 插件名称
+        Returns:
+            Dict[str, Any]: {"success": bool, "error"?: str}
+        """
+        if not plugin_name:
+            return {"success": False, "error": "插件名为空"}
+
+        if not self.token:
+            if not await self.login():
+                return {"success": False, "error": "API登录失败"}
+
+        try:
+            import aiohttp
+
+            headers = {"Authorization": f"Bearer {self.token}"}
+            candidates = [
+                ("POST", f"{self.astrbot_url}/api/plugin/uninstall"),
+                ("POST", f"{self.astrbot_url}/api/plugin/remove"),
+                ("POST", f"{self.astrbot_url}/api/plugin/delete"),
+                ("GET", f"{self.astrbot_url}/api/plugin/uninstall?name={plugin_name}")
+            ]
+
+            async with aiohttp.ClientSession() as session:
+                # 优先尝试 POST JSON 方式
+                for method, url in candidates:
+                    try:
+                        if method == "POST":
+                            async with session.post(url, json={"name": plugin_name}, headers=headers) as resp:
+                                result = await resp.json()
+                                if result.get("status") == "ok":
+                                    self.logger.info(f"✅ 插件卸载成功: {plugin_name}")
+                                    return {"success": True}
+                                else:
+                                    # 继续尝试其它端点
+                                    self.logger.warning(f"尝试卸载端点失败: {url}, message={result.get('message')}")
+                        else:
+                            async with session.get(url, headers=headers) as resp:
+                                result = await resp.json()
+                                if result.get("status") == "ok":
+                                    self.logger.info(f"✅ 插件卸载成功: {plugin_name}")
+                                    return {"success": True}
+                                else:
+                                    self.logger.warning(f"尝试卸载端点失败: {url}, message={result.get('message')}")
+                    except Exception as ie:
+                        self.logger.warning(f"调用卸载端点异常: {url}, err={ie}")
+
+            return {"success": False, "error": "未能通过API卸载插件"}
+        except Exception as e:
+            self.logger.error(f"卸载插件失败: {str(e)}")
+            return {"success": False, "error": str(e)}
+
     async def check_plugin_install_status(self, plugin_name: str) -> Dict[str, Any]:
         """检查插件安装状态和错误日志
         

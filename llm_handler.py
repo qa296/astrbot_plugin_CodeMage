@@ -566,6 +566,57 @@ class LLMHandler:
                     raise
                     
         raise ValueError(f"经过{max_retries}次重试，仍无法从LLM响应中提取修复后的插件代码")
+
+    async def fix_code_with_install_errors(self, code: str, error_logs: List[str], metadata: Dict[str, Any], markdown: str = "", max_retries: int = 3) -> str:
+        """基于安装/加载阶段的错误日志修复插件代码
+        
+        这类错误通常发生在插件被 AstrBot 加载时（如导入错误、签名不匹配、缺少装饰器/导入等）。
+        会将错误日志与当前代码一并提供给 LLM 进行定向修复。
+        
+        Args:
+            code: 当前插件代码
+            error_logs: 安装/加载过程中捕获的错误日志（建议按时间倒序，长度适中）
+            metadata: 插件元数据（用于提供上下文）
+            markdown: 插件文档（可选，用于额外上下文）
+            max_retries: 最大重试次数
+        Returns:
+            修复后的代码字符串
+        """
+        dev_docs = self._get_dev_docs()
+        system_prompt = f"""你是一名资深的 AstrBot 插件开发专家，擅长根据运行期/安装期的错误日志快速定位并修复问题。
+
+请根据给出的错误日志修复代码，使其能够在 AstrBot 中被正确加载与运行。必须遵守：
+- 仅使用 from astrbot.api import logger 获取日志对象，不要使用 logging 或 loguru。
+- 所有 @filter 装饰器必须从 astrbot.api.event 导入（from astrbot.api.event import filter）。
+- 若实现 on_llm_request/on_llm_response/on_decorating_result/after_message_sent 钩子，禁止使用 yield，需使用 event.send。
+- main.py 中必须存在继承自 Star 的类，并正确处理 __init__(self, context: Context, [config: AstrBotConfig])。
+- 如需持久化数据，须使用 AstrBot 规定的数据目录。
+- 遵守以下开发文档：\n{dev_docs}...\n
+请只返回修复后的 Python 代码，并放在```python 和 ```之间。"""
+
+        issues_str = "\n".join([f"- {e}" for e in (error_logs or [])])
+        prompt = (
+            "请根据下面的安装/加载错误日志修复插件代码。\n\n"
+            f"错误日志：\n{issues_str}\n\n"
+            f"当前代码：\n{code}\n\n"
+            f"插件元数据：\n{json.dumps(metadata, ensure_ascii=False, indent=2)}\n\n"
+            + (f"插件文档：\n{markdown}\n\n" if markdown else "")
+        )
+
+        for attempt in range(max_retries):
+            try:
+                response = await self.call_llm(prompt, system_prompt)
+                blocks = extract_code_blocks(response)
+                if blocks:
+                    return blocks[0]
+                if attempt < max_retries - 1:
+                    prompt += "\n\n重要：请仅返回修复后的完整 main.py 代码，且必须包含在```python 和 ```之间。"
+            except Exception as e:
+                logger.error(f"基于安装错误修复代码失败（尝试 {attempt + 1}/{max_retries}）：{str(e)}")
+                if attempt == max_retries - 1:
+                    raise
+
+        raise ValueError("无法从LLM响应中提取修复后的代码（安装错误修复）")
         
     async def generate_config_schema(self, metadata: Dict[str, Any],
                               description: str) -> str:

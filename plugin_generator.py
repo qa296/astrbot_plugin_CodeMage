@@ -637,6 +637,10 @@ class PluginGenerator:
                                 if status_check.get("has_errors"):
                                     error_msg = "⚠️ 插件安装后检测到错误：\n" + "\n".join(status_check.get("error_logs", []))
                                     await event.send(event.plain_result(error_msg))
+                                    fix_res = await self._auto_fix_after_install_error(plugin_name, metadata, code, markdown_doc, config_schema, status_check, event)
+                                    if fix_res.get("success"):
+                                        result["install_success"] = True
+                                        code = fix_res.get("code", code)
                             else:
                                 result["install_error"] = install_result.get("error", "未知错误")
                                 await event.send(event.plain_result(f"❌ 插件安装失败: {install_result.get('error')}"))
@@ -933,6 +937,10 @@ class PluginGenerator:
                                 if status_check.get("has_errors"):
                                     error_msg = "⚠️ 插件安装后检测到错误：\n" + "\n".join(status_check.get("error_logs", []))
                                     await event.send(event.plain_result(error_msg))
+                                    fix_res = await self._auto_fix_after_install_error(plugin_name, metadata, code, markdown_doc, config_schema, status_check, event)
+                                    if fix_res.get("success"):
+                                        result["install_success"] = True
+                                        code = fix_res.get("code", code)
                             else:
                                 result["install_error"] = install_result.get("error", "未知错误")
                                 await event.send(event.plain_result(f"❌ 插件安装失败: {install_result.get('error')}"))
@@ -1080,7 +1088,89 @@ class PluginGenerator:
             self.logger.info(f"已创建_conf_schema.json配置文件")
             
         return plugin_dir
-    
+
+    async def _auto_fix_after_install_error(self, plugin_name: str, metadata: Dict[str, Any], code: str, markdown: str, config_schema: str, status_check: Dict[str, Any], event: AstrMessageEvent) -> Dict[str, Any]:
+        """当检测到安装/加载错误时，删除已安装的插件目录并回退至审查，交由 LLM 修复后重试安装。
+        
+        Returns:
+            Dict[str, Any]: {"success": bool, "code": str}
+        """
+        # 先尝试卸载插件/删除目录
+        try:
+            if self.installer:
+                try:
+                    await self.installer.uninstall_plugin(plugin_name)
+                except Exception:
+                    pass
+            local_path = self.directory_detector.get_plugin_path(plugin_name)
+            if local_path and os.path.exists(local_path):
+                import shutil as _shutil
+                _shutil.rmtree(local_path, ignore_errors=True)
+        except Exception:
+            pass
+
+        # 回退状态
+        self._update_status(5, plugin_name)
+        await event.send(event.plain_result("已回退至代码审查阶段，正在尝试自动修复..."))
+
+        max_fix = int(self.config.get("install_error_fix_retries", 2))
+        satisfaction_threshold = self.config.get("satisfaction_threshold", 80)
+
+        for fix_idx in range(max_fix):
+            await event.send(event.plain_result(f"🔧 正在根据安装错误自动修复代码（第{fix_idx+1}/{max_fix}次）..."))
+            try:
+                code = await self.llm_handler.fix_code_with_install_errors(code, status_check.get("error_logs", []), metadata, markdown)
+            except Exception:
+                # 兜底：使用通用修复接口
+                code = await self.llm_handler.fix_plugin_code(code, status_check.get("error_logs", []), ["请修复上述安装/加载错误"])
+
+            # 审查
+            review_result2 = await self._review_code_with_retry(code, metadata, markdown)
+            try:
+                approved_ok = bool(review_result2.get("approved"))
+                score_ok = int(review_result2.get("satisfaction_score", 0)) >= satisfaction_threshold
+            except Exception:
+                approved_ok = False
+                score_ok = False
+            if not (approved_ok and score_ok):
+                try:
+                    code = await self.llm_handler.fix_plugin_code(code, review_result2.get("issues", []), review_result2.get("suggestions", []))
+                except Exception:
+                    pass
+
+            # 打包并重新安装
+            await event.send(event.plain_result("📦 正在重新打包并通过API安装修复后的插件..."))
+            import tempfile as _tmp
+            import shutil as _shutil
+            new_temp = _tmp.mkdtemp(prefix="codemage_plugin_fix_")
+            try:
+                new_plugin_path = await self._create_plugin_files(plugin_name, metadata, code, markdown, config_schema, base_dir=new_temp)
+                new_zip = await self.installer.create_plugin_zip(new_plugin_path)
+                if new_zip:
+                    new_install = await self.installer.install_plugin(new_zip)
+                    if os.path.exists(new_zip):
+                        os.remove(new_zip)
+                    if new_install.get("success"):
+                        await event.send(event.plain_result("✅ 修复后的插件已安装，正在进行二次错误检测..."))
+                        recheck = await self.installer.check_plugin_install_status(plugin_name)
+                        if not recheck.get("has_errors"):
+                            await event.send(event.plain_result("🎉 插件安装错误已自动修复！"))
+                            return {"success": True, "code": code}
+                        else:
+                            await event.send(event.plain_result("仍检测到错误，继续尝试修复..."))
+                            try:
+                                await self.installer.uninstall_plugin(plugin_name)
+                            except Exception:
+                                pass
+            finally:
+                try:
+                    if os.path.exists(new_temp):
+                        _shutil.rmtree(new_temp, ignore_errors=True)
+                except Exception:
+                    pass
+
+        return {"success": False, "code": code}
+
     async def modify_plugin_content(self, modification_type: str, feedback: str = "", event: Optional[AstrMessageEvent] = None) -> Dict[str, Any]:
         '''修改插件内容
         
