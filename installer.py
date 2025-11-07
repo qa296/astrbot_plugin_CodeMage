@@ -102,11 +102,12 @@ class PluginInstaller:
             self.logger.error(f"插件打包失败: {str(e)}")
             return None
             
-    async def install_plugin(self, zip_path: str) -> Dict[str, Any]:
+    async def install_plugin(self, zip_path: str, plugin_name: Optional[str] = None) -> Dict[str, Any]:
         """通过API安装插件
         
         Args:
             zip_path: 插件zip文件路径
+            plugin_name: 可选，期望的插件名称（用于避免后端根据随机上传文件名创建随机目录）
             
         Returns:
             Dict[str, Any]: 安装结果
@@ -134,9 +135,27 @@ class PluginInstaller:
             async with aiohttp.ClientSession() as session:
                 with open(zip_path, 'rb') as f:
                     data = aiohttp.FormData()
+                    # 一些后端会使用上传文件名作为插件目录名，这里显式指定一个稳定的名称
+                    inferred_name = None
+                    if not plugin_name:
+                        try:
+                            with zipfile.ZipFile(zip_path, 'r') as zf:
+                                top_levels = set()
+                                for n in zf.namelist():
+                                    if not n:
+                                        continue
+                                    seg = n.split('/')[0].strip()
+                                    if seg:
+                                        top_levels.add(seg)
+                                if len(top_levels) == 1:
+                                    inferred_name = list(top_levels)[0]
+                        except Exception:
+                            inferred_name = None
+                    final_name = plugin_name or inferred_name
+                    upload_filename = f"{final_name}.zip" if final_name else os.path.basename(zip_path)
                     data.add_field('file', 
                                  f,
-                                 filename=os.path.basename(zip_path),
+                                 filename=upload_filename,
                                  content_type='application/zip')
                     
                     headers = {
