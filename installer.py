@@ -71,30 +71,16 @@ class PluginInstaller:
             # 打包插件目录
             plugin_root_name = os.path.basename(os.path.normpath(plugin_dir))
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                # 显式写入顶层插件目录，确保ZIP中存在目录项，避免某些安装器误判为文件路径
-                if plugin_root_name:
-                    try:
-                        dir_info = zipfile.ZipInfo(f"{plugin_root_name}/")
-                        # 设置目录属性（在大多数解压器上不是必须，但更稳妥）
-                        dir_info.create_system = 3  # 标记为Unix以使 external_attr 生效
-                        dir_info.external_attr = 0o40775 << 16  # drwxrwxr-x
-                        zipf.writestr(dir_info, b"")
-                    except Exception:
-                        # 兼容性兜底：至少写入一个以/结尾的空目录名
-                        zipf.writestr(f"{plugin_root_name}/", b"")
-                
+                # 仅打包插件目录下的文件为 ZIP 根目录内容，避免解压后出现“插件目录/插件目录/文件”的情况
                 for root, dirs, files in os.walk(plugin_dir):
                     for file in files:
                         file_path = os.path.join(root, file)
-                        # AstrBot 需要 zip 顶层保留插件目录（plugin_name/main.py 等）
+                        # 确保归档名是相对 plugin_dir 的路径，直接位于 ZIP 根目录
                         relative_path = os.path.relpath(file_path, plugin_dir).replace(os.sep, '/')
-                        if plugin_root_name:
-                            arcname = f"{plugin_root_name}/{relative_path}"
-                        else:
-                            arcname = relative_path
+                        arcname = relative_path
                         zipf.write(file_path, arcname)
                         
-            structure_hint = f"{plugin_root_name}/..." if plugin_root_name else "根目录"
+            structure_hint = "根目录"
             self.logger.info(f"插件打包成功: {zip_path}，ZIP结构: {structure_hint}")
             return zip_path
             
@@ -140,15 +126,33 @@ class PluginInstaller:
                     if not plugin_name:
                         try:
                             with zipfile.ZipFile(zip_path, 'r') as zf:
-                                top_levels = set()
-                                for n in zf.namelist():
-                                    if not n:
+                                # 优先从 metadata.yaml 中解析 name 字段
+                                meta_candidates = [n for n in zf.namelist() if n.endswith('metadata.yaml') or n.endswith('metadata.yml') or n == 'metadata.yaml' or n == 'metadata.yml']
+                                for m in meta_candidates:
+                                    try:
+                                        with zf.open(m) as mf:
+                                            content = mf.read().decode('utf-8', errors='ignore')
+                                            for line in content.splitlines():
+                                                if line.strip().lower().startswith('name:'):
+                                                    val = line.split(':', 1)[1].strip().strip('"\'')
+                                                    if val:
+                                                        inferred_name = val
+                                                        break
+                                        if inferred_name:
+                                            break
+                                    except Exception:
                                         continue
-                                    seg = n.split('/')[0].strip()
-                                    if seg:
-                                        top_levels.add(seg)
-                                if len(top_levels) == 1:
-                                    inferred_name = list(top_levels)[0]
+                                # 回退：如果未能从 metadata 中解析，尝试沿用旧的顶层目录推断
+                                if not inferred_name:
+                                    top_levels = set()
+                                    for n in zf.namelist():
+                                        if not n:
+                                            continue
+                                        seg = n.split('/')[0].strip()
+                                        if seg:
+                                            top_levels.add(seg)
+                                    if len(top_levels) == 1:
+                                        inferred_name = list(top_levels)[0]
                         except Exception:
                             inferred_name = None
                     final_name = plugin_name or inferred_name
