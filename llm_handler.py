@@ -461,7 +461,7 @@ class LLMHandler:
       async def helloworld(self, event: AstrMessageEvent):
           '''这是 hello world 指令'''
           user_name = event.get_sender_name()
-          yield event.plain_result(f"Hello, {{user_name}}!")
+          yield event.plain_result(f"Hello, {user_name}!")
       
 
 - **消息发送方式**:
