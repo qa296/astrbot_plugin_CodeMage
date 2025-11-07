@@ -48,6 +48,29 @@ class CodeMagePlugin(Star):
         if not self.config.get("llm_provider_id"):
             self.logger.warning("未配置LLM提供商ID，请检查配置")
 
+    def _get_message_after_command(self, event: AstrMessageEvent) -> str:
+        """获取指令后的完整文本，包含空格
+
+        Args:
+            event: 消息事件
+        Returns:
+            str: 指令后的完整文本（去除指令本身与前后空白）
+        """
+        try:
+            msg = getattr(event, "message_str", "") or ""
+            msg = str(msg)
+        except Exception:
+            msg = ""
+        msg = msg.strip()
+        if not msg:
+            return ""
+        # 按第一个空白分割，后面的原样保留
+        # 例如："/生成插件 创建 一个 天气 插件" -> "创建 一个 天气 插件"
+        parts = msg.split(maxsplit=1)
+        if len(parts) < 2:
+            return ""
+        return parts[1].strip()
+
     def _check_admin_permission(self, event: AstrMessageEvent) -> bool:
         """检查管理员权限
 
@@ -97,18 +120,18 @@ class CodeMagePlugin(Star):
         return False
 
     @filter.command("生成插件", alias={"create_plugin", "new_plugin"})
-    async def generate_plugin_command(
-        self, event: AstrMessageEvent, plugin_description: str = ""
-    ):
+    async def generate_plugin_command(self, event: AstrMessageEvent):
         """生成AstrBot插件指令
 
-        Args:
-            plugin_description(string): 插件功能描述
+        使用完整消息解析，支持空格
         """
         # 检查管理员权限
         if not self._check_admin_permission(event):
             yield event.plain_result("⚠️ 仅管理员可以使用此功能")
             return
+
+        # 从完整消息中提取描述，避免空格被截断
+        plugin_description = self._get_message_after_command(event)
 
         if not plugin_description:
             yield event.plain_result(
@@ -285,12 +308,12 @@ class CodeMagePlugin(Star):
             yield event.plain_result(f"停止插件生成失败：{str(e)}")
 
     @filter.command("插件内容修改", alias={"modify_plugin", "modify"})
-    async def modify_plugin_content(self, event: AstrMessageEvent, feedback: str = "", modification_type: str = ""):
+    async def modify_plugin_content(self, event: AstrMessageEvent):
         """选择性修改插件内容指令
         
-        Args:
-            feedback(string): 修改内容描述
-            modification_type(string): 修改类型（配置文件/文档/元数据/全部），默认为"全部"
+        通过完整消息解析，支持空格。
+        用法：/插件内容修改 修改内容 [配置文件|文档|元数据|全部]
+        如果未指定类型，默认为“全部”。
         """
         # 检查管理员权限
         if not self._check_admin_permission(event):
@@ -303,16 +326,20 @@ class CodeMagePlugin(Star):
             yield event.plain_result("当前没有待确认的插件生成任务")
             return
         
-        # 默认修改类型为"全部"
-        if not modification_type or modification_type.strip() == "":
-            modification_type = "全部"
-        
-        # 标准化修改类型
-        modification_type = modification_type.strip()
-        valid_types = ["配置文件", "文档", "元数据", "全部"]
-        if modification_type not in valid_types:
-            yield event.plain_result(f"不支持的修改类型：{modification_type}\n支持的类型：配置文件、文档、元数据、全部")
+        # 从完整消息中提取参数文本
+        args_text = self._get_message_after_command(event)
+        if not args_text:
+            yield event.plain_result("请提供修改内容，例如：/插件内容修改 增加一个用户名配置项 配置文件")
             return
+        
+        # 解析修改类型（若最后一个独立词为合法类型，则作为类型；否则默认为“全部”）
+        valid_types = {"配置文件", "文档", "元数据", "全部"}
+        modification_type = "全部"
+        feedback = args_text.strip()
+        parts = args_text.rsplit(None, 1)
+        if len(parts) == 2 and parts[1] in valid_types:
+            feedback = parts[0].strip()
+            modification_type = parts[1]
         
         if not feedback:
             yield event.plain_result("请提供修改内容，例如：/插件内容修改 增加一个用户名配置项 配置文件")
