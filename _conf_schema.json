@@ -68,7 +68,7 @@
   "astrbot_url": {
     "description": "AstrBot API地址",
     "type": "string",
-    "hint": "AstrBot的API地址，用于安装插。一般情况下不用改。",
+    "hint": "AstrBot的API地址，用于安装插件。一般情况下不用改。",
     "default": "http://localhost:6185"
   },
   "api_username": {

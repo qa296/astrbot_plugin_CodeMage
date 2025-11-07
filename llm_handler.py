@@ -509,7 +509,7 @@ class LLMHandler:
 
 重要：如果发现任何安全问题或违反反向提示词要求，必须将 approved 设置为 false，并给出详细的问题描述。"""
 
-        prompt = f"请审查以下插件代码：\n\n代码：\n{code}\n\n元数据：\n{json.dumps(metadata, ensure_ascii=False, indent=2)}\n\n文档：\n{metadata}"
+        prompt = f"请审查以下插件代码：\n\n代码：\n{code}\n\n元数据：\n{json.dumps(metadata, ensure_ascii=False, indent=2)}\n\n文档：\n{markdown}"
         
         response = await self.call_llm(prompt, system_prompt, expect_json=True)
         
