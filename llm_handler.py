@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional, List
 from astrbot.api import logger
 from astrbot.api.star import Context
 from astrbot.api import AstrBotConfig
-from .utils import extract_code_blocks, parse_json_response
+from .utils import extract_code_blocks, parse_json_response, validate_plugin_description
 
 
 class LLMHandler:
@@ -91,13 +91,73 @@ class LLMHandler:
                 self._dev_docs_cache = ""
         
         return self._dev_docs_cache
+
+    async def check_description_against_negative_prompt(self, description: str) -> Dict[str, Any]:
+        """使用LLM判定描述是否违反反向提示词
+        
+        Args:
+            description: 插件描述
+        
+        Returns:
+            Dict[str, Any]: {"violation": bool, "matched_rules": List[str], "reason": str}
+        """
+        # 如果未配置反向提示词，则默认不违规
+        negative = (self.negative_prompt or "").strip()
+        if not negative:
+            return {"violation": False, "matched_rules": [], "reason": ""}
+        
+        system_prompt = f"""你是AstrBot插件安全审核员。请根据以下"反向提示词"严格判定用户提出的插件任务是否违反这些禁止项。
+
+- 若需求涉及、鼓励或可能绕过任一禁止项，必须视为违反。
+- 如无法确定，采取保守策略判定为违反。
+- 仅按要求输出JSON，包裹在```json和```之间。
+
+反向提示词（禁止事项）如下：
+{negative}
+
+请输出如下JSON结构：
+```json
+{{
+  "violation": true/false,
+  "matched_rules": ["命中的规则或关键词"],
+  "reason": "简要说明判定依据"
+}}
+```
+"""
+        
+        prompt = f"请审核以下插件需求是否违反上述反向提示词：\n\n{description}"
+        try:
+            resp = await self.call_llm(prompt, system_prompt)
+            blocks = extract_code_blocks(resp)
+            text = blocks[0] if blocks else resp
+            result = parse_json_response(text) or {}
+        except Exception as e:
+            self.logger.warning(f"LLM反向提示词校验失败: {str(e)}")
+            result = {}
+        
+        # 兜底解析失败时使用简单规则做保守判断
+        if not isinstance(result, dict) or "violation" not in result:
+            is_valid = validate_plugin_description(description)
+            return {
+                "violation": not is_valid,
+                "matched_rules": [] if is_valid else ["sensitive_words"],
+                "reason": "" if is_valid else "描述命中敏感词或过于简短"
+            }
+        
+        # 规范化返回
+        violation = bool(result.get("violation", False))
+        matched = result.get("matched_rules") or []
+        if isinstance(matched, str):
+            matched = [matched]
+        reason = result.get("reason") or ""
+        return {"violation": violation, "matched_rules": matched, "reason": reason}
     
     async def generate_plugin_metadata(self, description: str) -> Dict[str, Any]:
         """生成插件元数据和MD文档
         
         Args:
             description: 插件描述
-            
+        
         Returns:
             Dict[str, Any]: 包含元数据和MD文档的字典
         """
@@ -128,7 +188,7 @@ class LLMHandler:
     "repo_url": "仓库地址",
     "dependencies": ["依赖1", "依赖2"]
   }},
-  "markdown": "# 插件名称\\n\\n## 插件简介\\n\\n插件功能简要介绍\\n\\n## 功能说明\\n\\n插件提供的具体功能\\n\\n## 插件流程\\n\\n详细说明插件的工作流程和内部逻辑，包括各种情况下的处理过程\\n\\n## 使用方法\\n\\n详细说明如何使用插件的各项功能，包括命令使用示例等\\n\\n## 配置说明\\n\\n插件配置项说明\\n\\n## 注意事项\\n\\n使用插件需要注意的事项和限制"
+  "markdown": "# 插件名称\n\n## 插件简介\n\n插件功能简要介绍\n\n## 功能说明\n\n插件提供的具体功能\n\n## 插件流程\n\n详细说明插件的工作流程和内部逻辑，包括各种情况下的处理过程\n\n## 使用方法\n\n详细说明如何使用插件的各项功能，包括命令使用示例等\n\n## 配置说明\n\n插件配置项说明\n\n## 注意事项\n\n使用插件需要注意的事项和限制"
 }}
 ```
 
@@ -139,7 +199,7 @@ class LLMHandler:
 4. 使用方法部分需要提供具体的使用示例和操作指南
 5. 确保生成的内容符合反向提示词要求：{self.negative_prompt}
 6. 严格按照上述开发规范生成插件结构"""
-
+        
         prompt = f"请为以下插件描述生成元数据和Markdown文档：\n\n{description}"
         
         response = await self.call_llm(prompt, system_prompt)
@@ -261,7 +321,7 @@ class LLMHandler:
     "repo_url": "仓库地址",
     "dependencies": ["依赖1", "依赖2"]
   }},
-  "markdown": "# 插件名称\\n\\n## 插件简介\\n\\n插件功能简要介绍\\n\\n## 功能说明\\n\\n插件提供的具体功能\\n\\n## 插件流程\\n\\n详细说明插件的工作流程和内部逻辑，包括各种情况下的处理过程\\n\\n## 使用方法\\n\\n详细说明如何使用插件的各项功能，包括命令使用示例等\\n\\n## 配置说明\\n\\n插件配置项说明\\n\\n## 注意事项\\n\\n使用插件需要注意的事项和限制"
+  "markdown": "# 插件名称\n\n## 插件简介\n\n插件功能简要介绍\n\n## 功能说明\n\n插件提供的具体功能\n\n## 插件流程\n\n详细说明插件的工作流程和内部逻辑，包括各种情况下的处理过程\n\n## 使用方法\n\n详细说明如何使用插件的各项功能，包括命令使用示例等\n\n## 配置说明\n\n插件配置项说明\n\n## 注意事项\n\n使用插件需要注意的事项和限制"
 }}
 ```
 

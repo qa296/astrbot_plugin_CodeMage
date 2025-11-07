@@ -458,6 +458,19 @@ class PluginGenerator:
             # 步骤1：生成插件元数据
             self._update_status(1)
             await event.send(event.plain_result(self._build_step_message()))
+            # 先进行反向提示词合规性校验，若违反则终止生成
+            try:
+                check_res = await self.llm_handler.check_description_against_negative_prompt(description)
+                if isinstance(check_res, dict) and check_res.get("violation"):
+                    reason = check_res.get("reason") or "违反反向提示词"
+                    await event.send(event.plain_result(f"LLM判定该任务违反反向提示词，原因：{reason}，已终止生成。"))
+                    return {
+                        "success": False,
+                        "error": f"任务违反反向提示词：{reason}"
+                    }
+            except Exception as _:
+                # 校验失败不影响后续流程，但在元数据生成时仍会遵循反向提示词
+                pass
             try:
                 if step_by_step:
                     metadata = await self.llm_handler.generate_metadata_structure(description)
