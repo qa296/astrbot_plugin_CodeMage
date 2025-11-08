@@ -455,6 +455,32 @@ class PluginGenerator:
             markdown_doc = ""
             config_schema = ""
             
+            # 反向提示词合规性检查
+            negative_prompt = (self.config.get("negative_prompt") or "").strip()
+            if negative_prompt:
+                try:
+                    np_check = await self.llm_handler.check_description_against_negative_prompt(description)
+                    violate = bool(np_check.get("violate"))
+                    if violate:
+                        msg = "根据反向提示词策略，本次插件生成已终止。"
+                        reason = np_check.get("reason")
+                        if reason:
+                            msg += f"\n原因：{reason}"
+                        matched = np_check.get("matched_keywords") or []
+                        if matched:
+                            try:
+                                kws = ", ".join([str(x) for x in matched])
+                                msg += f"\n命中关键词：{kws}"
+                            except Exception:
+                                pass
+                        await event.send(event.plain_result(msg))
+                        return {
+                            "success": False,
+                            "error": "任务违反反向提示词，生成已终止"
+                        }
+                except Exception as e:
+                    self.logger.warning(f"反向提示词检查失败：{str(e)}")
+            
             # 步骤1：生成插件元数据
             self._update_status(1)
             await event.send(event.plain_result(self._build_step_message()))

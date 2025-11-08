@@ -92,6 +92,53 @@ class LLMHandler:
         
         return self._dev_docs_cache
     
+    async def check_description_against_negative_prompt(self, description: str) -> Dict[str, Any]:
+        """检查描述是否违反反向提示词。
+        返回包含 violate(bool), reason(str), matched_keywords(list[str]) 的字典。
+        """
+        negative = (self.negative_prompt or "").strip()
+        if not negative:
+            return {"violate": False, "reason": "", "matched_keywords": []}
+
+        system_prompt = f"""你是一个合规审查助手。根据以下反向提示词，判断用户的插件需求是否违反了反向提示词或存在规避限制的意图。
+
+请只输出一个 JSON，放在```json和```之间，严格使用以下格式：
+```json
+{{
+  "violate": true/false,
+  "reason": "简要说明违反的原因，若不违反则说明理由",
+  "matched_keywords": ["命中的关键词(可为空)"]
+}}
+```
+
+反向提示词（禁止或限制的行为/主题）：{negative}
+注意：如果用户描述涉及以上禁止内容的直接实现、显式教程或规避方式，应视为违反。"""
+        prompt = f"用户的插件描述：\n\n{description}"
+
+        response = await self.call_llm(prompt, system_prompt, expect_json=True)
+        result = parse_json_response(response)
+        if not result:
+            blocks = extract_code_blocks(response)
+            if blocks:
+                result = parse_json_response(blocks[0])
+
+        if not isinstance(result, dict):
+            return {"violate": False, "reason": "LLM未返回可解析结果，默认放行", "matched_keywords": []}
+
+        violate = result.get("violate")
+        if violate is None:
+            violate = result.get("violation") or result.get("blocked")
+        if isinstance(violate, str):
+            violate = violate.strip().lower() in {"true", "yes", "y", "1", "是", "违反", "违背"}
+        result["violate"] = bool(violate)
+
+        mk = result.get("matched_keywords")
+        if not isinstance(mk, list):
+            result["matched_keywords"] = [str(mk)] if mk else []
+
+        result["reason"] = result.get("reason") or ""
+        return result
+
     async def generate_plugin_metadata(self, description: str) -> Dict[str, Any]:
         """生成插件元数据和MD文档
         
