@@ -6,9 +6,11 @@ CodeMage插件安装器模块
 import os
 import zipfile
 import tempfile
+import shutil
 from typing import Dict, Any, Optional
 from astrbot.api import logger
 from astrbot.api import AstrBotConfig
+from .directory_detector import DirectoryDetector
 
 
 class PluginInstaller:
@@ -273,3 +275,76 @@ class PluginInstaller:
                 "success": False,
                 "error": str(e)
             }
+
+    async def uninstall_plugin_api(self, plugin_name: str) -> Dict[str, Any]:
+        """通过 API 卸载/删除已安装的插件
+        
+        会尝试多种可能的端点，适配不同版本的 AstrBot 后端。
+        """
+        if not self.token:
+            if not await self.login():
+                return {"success": False, "error": "API登录失败"}
+        try:
+            import aiohttp
+            headers = {"Authorization": f"Bearer {self.token}"}
+            candidates = [
+                f"{self.astrbot_url}/api/plugin/uninstall",
+                f"{self.astrbot_url}/api/plugin/delete",
+                f"{self.astrbot_url}/api/plugin/remove",
+            ]
+            last_error = None
+            async with aiohttp.ClientSession() as session:
+                for url in candidates:
+                    try:
+                        async with session.post(url, json={"name": plugin_name}, headers=headers) as resp:
+                            data = await resp.json()
+                            if data.get("status") == "ok":
+                                self.logger.info(f"✅ 通过API卸载插件成功: {plugin_name}")
+                                return {"success": True}
+                            else:
+                                last_error = data.get("message") or f"HTTP {resp.status}"
+                    except Exception as e:
+                        last_error = str(e)
+                        continue
+            return {"success": False, "error": last_error or "未知的API卸载错误"}
+        except Exception as e:
+            self.logger.error(f"卸载插件API请求失败: {str(e)}")
+            return {"success": False, "error": str(e)}
+
+    async def delete_plugin_files(self, plugin_name: str) -> Dict[str, Any]:
+        """从本地文件系统删除插件目录"""
+        try:
+            detector = DirectoryDetector()
+            plugin_path = detector.get_plugin_path(plugin_name)
+            if not plugin_path:
+                return {"success": True, "skipped": True, "message": "未发现本地插件目录"}
+            if os.path.exists(plugin_path):
+                try:
+                    shutil.rmtree(plugin_path)
+                    self.logger.info(f"🧹 已删除本地插件目录: {plugin_path}")
+                    return {"success": True, "path": plugin_path}
+                except Exception as e:
+                    self.logger.error(f"删除本地插件目录失败: {plugin_path}, 错误: {e}")
+                    return {"success": False, "error": str(e), "path": plugin_path}
+            return {"success": True, "skipped": True, "message": "插件目录不存在"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def cleanup_plugin(self, plugin_name: str) -> Dict[str, Any]:
+        """混合清理：优先通过 API 卸载，失败后尝试删除本地目录"""
+        api_res = await self.uninstall_plugin_api(plugin_name)
+        file_res = {"success": False}
+        # API 卸载失败或不确定时，尝试文件删除
+        if not api_res.get("success"):
+            file_res = await self.delete_plugin_files(plugin_name)
+        else:
+            # 即使 API 成功，也尝试清理本地残留（不影响结果）
+            try:
+                await self.delete_plugin_files(plugin_name)
+            except Exception:
+                pass
+        return {
+            "success": bool(api_res.get("success") or file_res.get("success")),
+            "api_deleted": api_res.get("success", False),
+            "file_deleted": file_res.get("success", False)
+        }
