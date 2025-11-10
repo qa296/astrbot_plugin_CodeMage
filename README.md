@@ -1,7 +1,7 @@
 # CodeMage - AI驱动的AstrBot插件生成器
 
 <p align="center">
-  <img src="https://github.com/qa296/astrbot_plugin_codemage/raw/main/assets/logo.png" alt="CodeMage Logo" width="200">
+  <img src="https://github.com/qa296/astrbot_plugin_CodeMage/blob/main/logo.png" alt="CodeMage Logo" width="200">
 </p>
 
 <p align="center">
