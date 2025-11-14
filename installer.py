@@ -273,3 +273,89 @@ class PluginInstaller:
                 "success": False,
                 "error": str(e)
             }
+        
+    async def _parse_api_response(self, resp) -> Dict[str, Any]:
+        """解析AstrBot API响应为统一结构"""
+        try:
+            data = await resp.json()
+        except Exception:
+            try:
+                text = await resp.text()
+            except Exception:
+                text = ""
+            data = {"status": "error", "message": text.strip()}
+        success = False
+        if resp.status < 400 and (data.get("status") == "ok" or data.get("success") is True):
+            success = True
+        elif resp.status in (200, 204) and not data.get("error") and not data.get("message"):
+            success = True
+        message = data.get("message") or data.get("error") or f"HTTP {resp.status}"
+        return {
+            "success": success,
+            "data": data,
+            "message": message
+        }
+    
+    async def uninstall_plugin(self, plugin_name: str) -> Dict[str, Any]:
+        """通过API卸载插件"""
+        if not plugin_name:
+            return {
+                "success": False,
+                "error": "插件名称不能为空"
+            }
+    
+        if not self.token:
+            if not await self.login():
+                return {
+                    "success": False,
+                    "error": "API登录失败"
+                }
+    
+        try:
+            import aiohttp
+    
+            headers = {
+                "Authorization": f"Bearer {self.token}"
+            }
+            payload_candidates = [
+                {"plugin_name": plugin_name},
+                {"name": plugin_name},
+                {"id": plugin_name},
+                {"plugin": plugin_name},
+            ]
+            endpoints = [
+                ("post", f"{self.astrbot_url}/api/plugin/uninstall", payload_candidates),
+                ("post", f"{self.astrbot_url}/api/plugin/delete", payload_candidates),
+                ("delete", f"{self.astrbot_url}/api/plugin/{plugin_name}", [None]),
+            ]
+    
+            last_error = ""
+            async with aiohttp.ClientSession() as session:
+                for method, url, payloads in endpoints:
+                    for payload in payloads:
+                        try:
+                            request_kwargs = {"headers": headers}
+                            if payload:
+                                request_kwargs["json"] = payload
+                            async with session.request(method.upper(), url, **request_kwargs) as resp:
+                                parsed = await self._parse_api_response(resp)
+                            if parsed.get("success"):
+                                self.logger.info(f"✅ 插件卸载成功: {plugin_name} ({url})")
+                                return {"success": True}
+                            last_error = parsed.get("message") or last_error
+                        except Exception as call_err:
+                            last_error = str(call_err)
+    
+            if last_error:
+                self.logger.warning(f"插件API卸载失败: {last_error}")
+            return {
+                "success": False,
+                "error": last_error or "未能通过API卸载插件"
+            }
+    
+        except Exception as e:
+            self.logger.error(f"插件卸载请求失败: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }

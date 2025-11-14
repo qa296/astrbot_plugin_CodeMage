@@ -6,8 +6,8 @@ CodeMage插件生成器模块
 import os
 import json
 import time
-import asyncio
-from typing import Dict, Any, Optional, List
+import shutil
+from typing import Dict, Any, Optional, List, Tuple
 from astrbot.api import logger
 from astrbot.api.star import Context, Star
 from astrbot.api import AstrBotConfig
@@ -277,6 +277,241 @@ class PluginGenerator:
                 walk(key, item, parent_label=None)
         return rows
 
+    def _normalize_review_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """规范化LLM审查结果结构"""
+        normalized: Dict[str, Any] = {}
+        if isinstance(result, dict):
+            normalized.update(result)
+        else:
+            normalized["reason"] = str(result)
+        approved = normalized.get("approved")
+        if approved is None:
+            approved = normalized.get("是否同意") or normalized.get("agree")
+        if isinstance(approved, str):
+            approved = approved.strip().lower() in {"true", "yes", "同意", "通过", "approved"}
+        normalized["approved"] = bool(approved)
+        satisfaction = normalized.get("satisfaction_score")
+        if satisfaction is None:
+            satisfaction = normalized.get("满意分数") or normalized.get("score")
+        try:
+            satisfaction = int(float(satisfaction))
+        except (TypeError, ValueError):
+            satisfaction = 0
+        normalized["satisfaction_score"] = satisfaction
+        reason = normalized.get("reason") or normalized.get("理由") or ""
+        normalized["reason"] = reason
+        issues = normalized.get("issues") or normalized.get("问题") or []
+        if isinstance(issues, str):
+            issues = [issues]
+        if not isinstance(issues, list):
+            issues = [str(issues)]
+        if not issues and reason:
+            issues = [reason]
+        normalized["issues"] = issues
+        suggestions = normalized.get("suggestions") or normalized.get("建议") or []
+        if isinstance(suggestions, str):
+            suggestions = [suggestions]
+        if not isinstance(suggestions, list):
+            suggestions = [str(suggestions)]
+        if not suggestions and reason:
+            suggestions = ["请根据以下理由修复问题：" + reason]
+        normalized["suggestions"] = suggestions
+        return normalized
+
+    async def _ensure_code_review_passed(
+        self,
+        code: str,
+        metadata: Dict[str, Any],
+        markdown_doc: str,
+        event: AstrMessageEvent,
+        satisfaction_threshold: int,
+        strict_review: bool,
+        max_retries: int,
+        unlimited_retry: bool,
+    ) -> Tuple[str, Dict[str, Any], bool]:
+        """确保代码审查通过，如有需要自动调用LLM修复"""
+        review_result = self._normalize_review_result(
+            await self._review_code_with_retry(code, metadata, markdown_doc)
+        )
+        attempt = 0
+        while ((review_result["satisfaction_score"] < satisfaction_threshold) or (not review_result["approved"])):
+            if not unlimited_retry and attempt >= max_retries:
+                break
+            attempt += 1
+            if strict_review and not review_result["approved"]:
+                await event.send(event.plain_result(f"代码审查未通过，正在修复（第{attempt}次重试）..."))
+            else:
+                await event.send(event.plain_result(f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{attempt}次重试）..."))
+            issues = review_result.get("issues") or []
+            if not issues:
+                issues = [review_result.get("reason", "代码审查未通过")]
+            suggestions = review_result.get("suggestions") or []
+            if not suggestions:
+                suggestions = ["请根据上述问题修复插件代码"]
+            try:
+                code = await self.llm_handler.fix_plugin_code(code, issues, suggestions)
+            except Exception as fix_err:
+                self.logger.error(f"修复插件代码失败：{str(fix_err)}")
+                raise
+            review_result = self._normalize_review_result(
+                await self.llm_handler.review_plugin_code(code, metadata, markdown_doc)
+            )
+        passed = bool(review_result.get("approved")) and review_result.get("satisfaction_score", 0) >= satisfaction_threshold
+        return code, review_result, passed
+
+    async def _install_via_api(
+        self,
+        plugin_name: str,
+        metadata: Dict[str, Any],
+        code: str,
+        markdown_doc: str,
+        config_schema: str,
+    ) -> Dict[str, Any]:
+        """通过 AstrBot API 安装插件并进行错误检测"""
+        import tempfile
+
+        outcome: Dict[str, Any] = {
+            "success": False,
+            "installed": False,
+            "error": "",
+            "issues": [],
+            "cleanup": True,
+            "status_check": None,
+            "status_check_success": None,
+            "status_check_error": None,
+            "post_install_errors": False,
+            "warnings": [],
+        }
+        if not self.installer or not self.config.get("api_password_md5"):
+            outcome["error"] = "未配置API安装"
+            outcome["cleanup"] = False
+            return outcome
+
+        temp_dir = tempfile.mkdtemp(prefix="codemage_plugin_")
+        zip_path: Optional[str] = None
+        try:
+            plugin_path = await self._create_plugin_files(
+                plugin_name, metadata, code, markdown_doc, config_schema, base_dir=temp_dir
+            )
+            self.logger.info(f"插件已在临时目录生成: {plugin_name} -> {plugin_path}")
+
+            zip_path = await self.installer.create_plugin_zip(plugin_path)
+            if not zip_path:
+                outcome["error"] = "插件打包失败"
+                outcome["issues"] = ["插件打包失败"]
+                return outcome
+
+            install_result = await self.installer.install_plugin(zip_path, plugin_name=plugin_name)
+            outcome["installed"] = bool(install_result.get("success"))
+            if not install_result.get("success"):
+                err_msg = install_result.get("error", "未知错误")
+                outcome["error"] = err_msg
+                outcome["issues"] = [err_msg]
+                return outcome
+
+            status_check = await self.installer.check_plugin_install_status(plugin_name)
+            outcome["status_check"] = status_check
+            outcome["status_check_success"] = status_check.get("success")
+
+            if not status_check.get("success"):
+                outcome["status_check_error"] = status_check.get("error")
+                outcome["success"] = True
+                outcome["cleanup"] = False
+                return outcome
+
+            if status_check.get("has_errors"):
+                error_logs = status_check.get("error_logs", [])
+                message = "\n".join(error_logs) if error_logs else status_check.get("error") or "插件安装后检测到错误"
+                outcome["error"] = message
+                outcome["issues"] = error_logs or [message]
+                outcome["post_install_errors"] = True
+                return outcome
+
+            if status_check.get("has_warnings"):
+                outcome["warnings"] = status_check.get("warning_logs", [])
+
+            outcome["success"] = True
+            outcome["cleanup"] = False
+            return outcome
+        except Exception as api_err:
+            error_text = str(api_err)
+            self.logger.error(f"API安装过程中发生异常: {error_text}")
+            outcome["error"] = error_text
+            outcome["issues"] = [error_text]
+            return outcome
+        finally:
+            if zip_path and os.path.exists(zip_path):
+                try:
+                    os.remove(zip_path)
+                except Exception:
+                    pass
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    async def _install_via_file(
+        self,
+        plugin_name: str,
+        metadata: Dict[str, Any],
+        code: str,
+        markdown_doc: str,
+        config_schema: str,
+    ) -> Dict[str, Any]:
+        """通过文件方式安装插件"""
+        outcome: Dict[str, Any] = {"success": False, "plugin_path": "", "deletion": None}
+
+        deletion_result = self._delete_plugin_files(plugin_name)
+        outcome["deletion"] = deletion_result
+        if deletion_result.get("success") is False:
+            outcome["error"] = deletion_result.get("error", "插件目录删除失败")
+            return outcome
+
+        try:
+            plugin_path = await self._create_plugin_files(
+                plugin_name, metadata, code, markdown_doc, config_schema
+            )
+            self.logger.info(f"插件生成成功: {plugin_name} -> {plugin_path}")
+            outcome["success"] = True
+            outcome["plugin_path"] = plugin_path
+            return outcome
+        except Exception as file_err:
+            error_text = str(file_err)
+            self.logger.error(f"本地创建插件文件失败: {error_text}")
+            outcome["error"] = error_text
+            return outcome
+
+    def _delete_plugin_files(self, plugin_name: str) -> Dict[str, Any]:
+        """删除插件目录"""
+        plugin_path = self.directory_detector.get_plugin_path(plugin_name)
+        if not plugin_path or not os.path.exists(plugin_path):
+            return {"success": True, "skipped": True}
+        try:
+            shutil.rmtree(plugin_path)
+            self.logger.info(f"已删除插件目录: {plugin_path}")
+            return {"success": True, "path": plugin_path}
+        except Exception as remove_err:
+            error_text = str(remove_err)
+            self.logger.error(f"删除插件目录失败: {error_text}")
+            return {"success": False, "error": error_text, "path": plugin_path}
+
+    async def _cleanup_plugin_installation(self, plugin_name: str) -> Dict[str, Any]:
+        """在安装失败后清理插件"""
+        cleanup_info: Dict[str, Any] = {"api": None, "file": None}
+        api_success = False
+
+        if self.installer and self.config.get("api_password_md5"):
+            try:
+                api_result = await self.installer.uninstall_plugin(plugin_name)
+            except Exception as api_err:
+                api_result = {"success": False, "error": str(api_err)}
+            cleanup_info["api"] = api_result
+            api_success = bool(api_result.get("success"))
+
+        if not api_success:
+            cleanup_info["file"] = self._delete_plugin_files(plugin_name)
+        else:
+            cleanup_info["file"] = {"success": True, "skipped": True}
+
+        return cleanup_info
+
     async def _send_doc_and_config_images(self, event: AstrMessageEvent, metadata: Dict[str, Any], markdown: str, config_schema: str):
         """使用 AstrBot 的 t2i 将文档与配置以图片形式发送，并将配置转成可读表格"""
         if not self.star:
@@ -375,41 +610,7 @@ class PluginGenerator:
         self.generation_status["is_generating"] = True
         self.generation_status["start_time"] = format_time(time.time())
         
-        def normalize_review_result(result: Dict[str, Any]) -> Dict[str, Any]:
-            approved = result.get("approved")
-            if approved is None:
-                approved = result.get("是否同意") or result.get("agree")
-            if isinstance(approved, str):
-                approved = approved.strip().lower() in {"true", "yes", "同意", "通过", "approved"}
-            result["approved"] = bool(approved)
-            satisfaction = result.get("satisfaction_score")
-            if satisfaction is None:
-                satisfaction = result.get("满意分数") or result.get("score")
-            try:
-                satisfaction = int(float(satisfaction))
-            except (TypeError, ValueError):
-                satisfaction = 0
-            result["satisfaction_score"] = satisfaction
-            reason = result.get("reason") or result.get("理由") or ""
-            result["reason"] = reason
-            issues = result.get("issues") or result.get("问题") or []
-            if isinstance(issues, str):
-                issues = [issues]
-            if not isinstance(issues, list):
-                issues = [str(issues)]
-            if not issues and reason:
-                issues = [reason]
-            result["issues"] = issues
-            suggestions = result.get("suggestions") or result.get("建议") or []
-            if isinstance(suggestions, str):
-                suggestions = [suggestions]
-            if not isinstance(suggestions, list):
-                suggestions = [str(suggestions)]
-            if not suggestions and reason:
-                suggestions = ["请根据以下理由修复问题：" + reason]
-            result["suggestions"] = suggestions
-            return result
-        
+
         try:
             # 验证目录结构（根据配置选择安装方式）
             install_method = self.config.get("install_method", "auto")
@@ -573,92 +774,7 @@ class PluginGenerator:
                     "error": error_msg
                 }
             
-            # 步骤5：代码审查与修复
-            self._update_status(5, plugin_name)
-            await event.send(event.plain_result(self._build_step_message()))
-            self.logger.info(f"开始代码审查: {plugin_name}")
-            review_result = normalize_review_result(await self._review_code_with_retry(code, metadata, markdown_doc))
-            satisfaction_threshold = self.config.get("satisfaction_threshold", 80)
-            strict_review = self.config.get("strict_review", True)
-            max_retries = self.config.get("max_retries", 3)
-            unlimited_retry = max_retries == -1
-            retry_count = 0
-            
-            while ((review_result["satisfaction_score"] < satisfaction_threshold) or (not review_result["approved"])) and (unlimited_retry or retry_count < max_retries):
-                retry_count += 1
-                if strict_review and not review_result["approved"]:
-                    await event.send(event.plain_result(f"代码审查未通过，正在修复（第{retry_count}次重试）..."))
-                else:
-                    await event.send(event.plain_result(f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."))
-                code = await self.llm_handler.fix_plugin_code(code, review_result["issues"], review_result["suggestions"])
-                review_result = normalize_review_result(await self.llm_handler.review_plugin_code(code, metadata, markdown_doc))
-            
-            if (review_result["satisfaction_score"] < satisfaction_threshold) or (not review_result["approved"]):
-                reason = review_result.get("reason", "代码审查未通过")
-                return {
-                    "success": False,
-                    "error": f"代码审查未通过：{reason}"
-                }
-            
-            await event.send(event.plain_result(f"代码审查通过，满意度得分：{review_result['satisfaction_score']}分"))
-            
-            # 步骤6：生成最终插件并安装
-            self._update_status(6, plugin_name)
-            await event.send(event.plain_result(self._build_step_message()))
-            
-            result = {
-                "success": True,
-                "plugin_name": plugin_name,
-                "plugin_path": "",
-                "satisfaction_score": review_result["satisfaction_score"],
-                "installed": False
-            }
-            
-            # 尝试通过API安装插件
-            if self.installer and self.config.get("api_password_md5"):
-                import tempfile
-                import shutil
-                await event.send(event.plain_result("正在通过API安装插件..."))
-                try:
-                    temp_dir = tempfile.mkdtemp(prefix="codemage_plugin_")
-                    try:
-                        plugin_path = await self._create_plugin_files(plugin_name, metadata, code, markdown_doc, config_schema, base_dir=temp_dir)
-                        self.logger.info(f"插件已在临时目录生成: {plugin_name} -> {plugin_path}")
-                        result["plugin_path"] = plugin_path
-                        
-                        zip_path = await self.installer.create_plugin_zip(plugin_path)
-                        if zip_path:
-                            install_result = await self.installer.install_plugin(zip_path)
-                            result["installed"] = True
-                            result["install_success"] = install_result.get("success", False)
-                            if install_result.get("success"):
-                                await event.send(event.plain_result("✅ 插件已通过API安装"))
-                                status_check = await self.installer.check_plugin_install_status(plugin_name)
-                                if status_check.get("has_errors"):
-                                    error_msg = "⚠️ 插件安装后检测到错误：\n" + "\n".join(status_check.get("error_logs", []))
-                                    await event.send(event.plain_result(error_msg))
-                            else:
-                                result["install_error"] = install_result.get("error", "未知错误")
-                                await event.send(event.plain_result(f"❌ 插件安装失败: {install_result.get('error')}"))
-                            if os.path.exists(zip_path):
-                                os.remove(zip_path)
-                    finally:
-                        if os.path.exists(temp_dir):
-                            shutil.rmtree(temp_dir)
-                            self.logger.info(f"已清理临时目录: {temp_dir}")
-                except Exception as e:
-                    self.logger.error(f"安装插件失败: {str(e)}")
-                    result["install_error"] = str(e)
-                    await event.send(event.plain_result(f"❌ 安装插件失败: {str(e)}"))
-            else:
-                self.logger.info("未配置API密码或installer，在本地创建插件文件")
-                plugin_path = await self._create_plugin_files(plugin_name, metadata, code, markdown_doc, config_schema)
-                self.logger.info(f"插件生成成功: {plugin_name} -> {plugin_path}")
-                result["plugin_path"] = plugin_path
-                await event.send(event.plain_result(f"插件已在本地创建: {plugin_path}\n请手动重启AstrBot以加载插件"))
-            
-            return result
-            
+
         except Exception as e:
             self.logger.error(f"插件生成流程失败：{str(e)}")
             return {
@@ -805,21 +921,7 @@ class PluginGenerator:
             metadata["name"] = plugin_name
             self._update_status(4, plugin_name)
             
-            # 根据配置选择安装方式（可能临时禁用API安装）
-            install_method = self.config.get("install_method", "auto")
-            restore_api_pwd2 = False
-            saved_api_pwd2 = None
-            if install_method == "file":
-                saved_api_pwd2 = self.config.get("api_password_md5")
-                if saved_api_pwd2:
-                    self.config["api_password_md5"] = ""
-                    restore_api_pwd2 = True
-            elif install_method == "api" and not self.config.get("api_password_md5"):
-                await event.send(event.plain_result("已选择API安装，但未配置API密码(MD5)，将改为本地文件安装"))
-                saved_api_pwd2 = self.config.get("api_password_md5")
-                self.config["api_password_md5"] = ""
-                restore_api_pwd2 = True
-            
+
             # 步骤4：生成插件代码
             await event.send(event.plain_result(self._build_step_message()))
             self.logger.info(f"开始生成插件代码: {plugin_name}")
@@ -837,71 +939,43 @@ class PluginGenerator:
             self._update_status(5, plugin_name)
             await event.send(event.plain_result(self._build_step_message()))
             self.logger.info(f"开始代码审查: {plugin_name}")
-            
-            def normalize_review_result(result: Dict[str, Any]) -> Dict[str, Any]:
-                approved = result.get("approved")
-                if approved is None:
-                    approved = result.get("是否同意") or result.get("agree")
-                if isinstance(approved, str):
-                    approved = approved.strip().lower() in {"true", "yes", "同意", "通过", "approved"}
-                result["approved"] = bool(approved)
-                satisfaction = result.get("satisfaction_score")
-                if satisfaction is None:
-                    satisfaction = result.get("满意分数") or result.get("score")
-                try:
-                    satisfaction = int(float(satisfaction))
-                except (TypeError, ValueError):
-                    satisfaction = 0
-                result["satisfaction_score"] = satisfaction
-                reason = result.get("reason") or result.get("理由") or ""
-                result["reason"] = reason
-                issues = result.get("issues") or result.get("问题") or []
-                if isinstance(issues, str):
-                    issues = [issues]
-                if not isinstance(issues, list):
-                    issues = [str(issues)]
-                if not issues and reason:
-                    issues = [reason]
-                result["issues"] = issues
-                suggestions = result.get("suggestions") or result.get("建议") or []
-                if isinstance(suggestions, str):
-                    suggestions = [suggestions]
-                if not isinstance(suggestions, list):
-                    suggestions = [str(suggestions)]
-                if not suggestions and reason:
-                    suggestions = ["请根据以下理由修复问题：" + reason]
-                result["suggestions"] = suggestions
-                return result
-                
-            review_result = normalize_review_result(await self._review_code_with_retry(code, metadata, markdown_doc))
+
             satisfaction_threshold = self.config.get("satisfaction_threshold", 80)
             strict_review = self.config.get("strict_review", True)
             max_retries = self.config.get("max_retries", 3)
             unlimited_retry = max_retries == -1
-            retry_count = 0
-            
-            while ((review_result["satisfaction_score"] < satisfaction_threshold) or (not review_result["approved"])) and (unlimited_retry or retry_count < max_retries):
-                retry_count += 1
-                if strict_review and not review_result["approved"]:
-                    await event.send(event.plain_result(f"代码审查未通过，正在修复（第{retry_count}次重试）..."))
-                else:
-                    await event.send(event.plain_result(f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."))
-                code = await self.llm_handler.fix_plugin_code(code, review_result["issues"], review_result["suggestions"])
-                review_result = normalize_review_result(await self.llm_handler.review_plugin_code(code, metadata, markdown_doc))
-            
-            if (review_result["satisfaction_score"] < satisfaction_threshold) or (not review_result["approved"]):
+
+            try:
+                code, review_result, review_passed = await self._ensure_code_review_passed(
+                    code=code,
+                    metadata=metadata,
+                    markdown_doc=markdown_doc,
+                    event=event,
+                    satisfaction_threshold=satisfaction_threshold,
+                    strict_review=strict_review,
+                    max_retries=max_retries,
+                    unlimited_retry=unlimited_retry,
+                )
+            except Exception as review_err:
+                self.logger.error(f"代码审查流程失败: {str(review_err)}")
+                return {
+                    "success": False,
+                    "error": f"代码审查流程失败：{str(review_err)}"
+                }
+
+            if not review_passed:
                 reason = review_result.get("reason", "代码审查未通过")
                 return {
                     "success": False,
                     "error": f"代码审查未通过：{reason}"
                 }
-            
+
             await event.send(event.plain_result(f"代码审查通过，满意度得分：{review_result['satisfaction_score']}分"))
-            
+
             # 步骤6：生成最终插件并安装
             self._update_status(6, plugin_name)
             await event.send(event.plain_result(self._build_step_message()))
-            
+
             result = {
                 "success": True,
                 "plugin_name": plugin_name,
@@ -909,49 +983,115 @@ class PluginGenerator:
                 "satisfaction_score": review_result["satisfaction_score"],
                 "installed": False
             }
-            
-            # 尝试通过API安装插件
-            if self.installer and self.config.get("api_password_md5"):
-                import tempfile
-                import shutil
-                await event.send(event.plain_result("正在通过API安装插件..."))
-                try:
-                    temp_dir = tempfile.mkdtemp(prefix="codemage_plugin_")
-                    try:
-                        plugin_path = await self._create_plugin_files(plugin_name, metadata, code, markdown_doc, config_schema, base_dir=temp_dir)
-                        self.logger.info(f"插件已在临时目录生成: {plugin_name} -> {plugin_path}")
-                        result["plugin_path"] = plugin_path
-                        
-                        zip_path = await self.installer.create_plugin_zip(plugin_path)
-                        if zip_path:
-                            install_result = await self.installer.install_plugin(zip_path)
-                            result["installed"] = True
-                            result["install_success"] = install_result.get("success", False)
-                            if install_result.get("success"):
-                                await event.send(event.plain_result("✅ 插件已通过API安装"))
-                                status_check = await self.installer.check_plugin_install_status(plugin_name)
-                                if status_check.get("has_errors"):
-                                    error_msg = "⚠️ 插件安装后检测到错误：\n" + "\n".join(status_check.get("error_logs", []))
-                                    await event.send(event.plain_result(error_msg))
-                            else:
-                                result["install_error"] = install_result.get("error", "未知错误")
-                                await event.send(event.plain_result(f"❌ 插件安装失败: {install_result.get('error')}"))
-                            if os.path.exists(zip_path):
-                                os.remove(zip_path)
-                    finally:
-                        if os.path.exists(temp_dir):
-                            shutil.rmtree(temp_dir)
-                            self.logger.info(f"已清理临时目录: {temp_dir}")
-                except Exception as e:
-                    self.logger.error(f"安装插件失败: {str(e)}")
-                    result["install_error"] = str(e)
-                    await event.send(event.plain_result(f"❌ 安装插件失败: {str(e)}"))
-            else:
-                self.logger.info("未配置API密码或installer，在本地创建插件文件")
-                plugin_path = await self._create_plugin_files(plugin_name, metadata, code, markdown_doc, config_schema)
-                self.logger.info(f"插件生成成功: {plugin_name} -> {plugin_path}")
-                result["plugin_path"] = plugin_path
-                await event.send(event.plain_result(f"插件已在本地创建: {plugin_path}\n请手动重启AstrBot以加载插件"))
+
+            api_enabled = bool(self.installer and self.config.get("api_password_md5"))
+            install_retry_count = 0
+            last_install_error = ""
+            last_install_issues: List[str] = []
+            api_install_success = False
+
+            if api_enabled and install_method in ("api", "auto"):
+                while True:
+                    await event.send(event.plain_result("正在通过API安装插件..."))
+                    api_outcome = await self._install_via_api(plugin_name, metadata, code, markdown_doc, config_schema)
+
+                    if api_outcome.get("success"):
+                        api_install_success = True
+                        result["installed"] = True
+                        result["install_success"] = True
+                        result["install_method"] = "api"
+                        await event.send(event.plain_result("✅ 插件已通过API安装"))
+                        status_check_error = api_outcome.get("status_check_error")
+                        if status_check_error:
+                            await event.send(event.plain_result(f"⚠️ 插件安装成功，但无法获取日志信息：{status_check_error}"))
+                        warnings = api_outcome.get("warnings") or []
+                        if warnings:
+                            preview = "\n".join(warnings[:3])
+                            await event.send(event.plain_result(f"⚠️ 插件安装完成，但存在警告日志：\n{preview}"))
+                        break
+
+                    last_install_error = api_outcome.get("error") or "插件通过API安装失败"
+                    last_install_issues = api_outcome.get("issues") or [last_install_error]
+                    heading = "⚠️ 插件通过API安装失败：" if not api_outcome.get("post_install_errors") else "⚠️ 插件安装后检测到错误："
+                    preview = "\n".join(last_install_issues[:5])
+                    details = preview or last_install_error
+                    if details:
+                        await event.send(event.plain_result(f"{heading}\n{details}"))
+                    else:
+                        await event.send(event.plain_result(heading))
+                    cleanup_info = await self._cleanup_plugin_installation(plugin_name)
+                    cleanup_api = cleanup_info.get("api")
+                    if cleanup_api and not cleanup_api.get("success"):
+                        api_cleanup_msg = cleanup_api.get("error") or cleanup_api.get("message")
+                        if api_cleanup_msg:
+                            await event.send(event.plain_result(f"⚠️ 通过API删除插件失败：{api_cleanup_msg}"))
+                    cleanup_file = cleanup_info.get("file")
+                    if cleanup_file and cleanup_file.get("success") is False:
+                        await event.send(event.plain_result(f"⚠️ 删除插件目录失败：{cleanup_file.get('error')}"))
+
+                    if not unlimited_retry and install_retry_count >= max_retries:
+                        break
+
+                    install_retry_count += 1
+                    await event.send(event.plain_result(f"正在回退到审查步骤并尝试自动修复（第{install_retry_count}次重试）..."))
+
+                    suggestions = last_install_issues.copy()
+                    suggestions.append("请根据这些安装错误修复插件代码并确保插件能够成功加载。")
+                    code = await self.llm_handler.fix_plugin_code(code, last_install_issues, suggestions)
+                    code, review_result, review_passed = await self._ensure_code_review_passed(
+                        code=code,
+                        metadata=metadata,
+                        markdown_doc=markdown_doc,
+                        event=event,
+                        satisfaction_threshold=satisfaction_threshold,
+                        strict_review=strict_review,
+                        max_retries=max_retries,
+                        unlimited_retry=unlimited_retry,
+                    )
+                    if not review_passed:
+                        reason = review_result.get("reason", "代码审查未通过")
+                        return {
+                            "success": False,
+                            "error": f"代码审查未通过：{reason}"
+                        }
+                    result["satisfaction_score"] = review_result["satisfaction_score"]
+                    await event.send(event.plain_result(f"修复后的代码审查通过，满意度得分：{review_result['satisfaction_score']}分"))
+
+                if not api_install_success and install_method == "api":
+                    error_message = last_install_error or "插件通过API安装失败"
+                    if not unlimited_retry and install_retry_count >= max_retries:
+                        await event.send(event.plain_result("❌ 插件API安装失败，已达到配置的最大重试次数。"))
+                    return {
+                        "success": False,
+                        "error": f"插件API安装失败：{error_message}"
+                    }
+
+            if api_install_success:
+                return result
+
+            if last_install_error:
+                result["install_error"] = last_install_error
+
+            if api_enabled and install_method == "auto":
+                if not unlimited_retry and install_retry_count >= max_retries:
+                    await event.send(event.plain_result("⚠️ API 安装未成功且已达到最大重试次数，改为文件方式安装，请稍候并在完成后重启AstrBot以加载插件。"))
+                else:
+                    await event.send(event.plain_result("⚠️ API 安装未成功，改为文件方式安装，请稍候并在完成后重启AstrBot以加载插件。"))
+
+            file_outcome = await self._install_via_file(plugin_name, metadata, code, markdown_doc, config_schema)
+            if not file_outcome.get("success"):
+                error_message = file_outcome.get("error", "插件文件安装失败")
+                return {
+                    "success": False,
+                    "error": f"插件文件安装失败：{error_message}"
+                }
+
+            plugin_path = file_outcome.get("plugin_path", "")
+            result["plugin_path"] = plugin_path
+            result["installed"] = True
+            result["install_success"] = True
+            result["install_method"] = "file"
+            await event.send(event.plain_result(f"插件已在本地创建: {plugin_path}\n请手动重启AstrBot以加载插件"))
             
             return result
             
@@ -964,8 +1104,8 @@ class PluginGenerator:
         finally:
             # 恢复API密码配置（如有临时修改）
             try:
-                if restore_api_pwd2:
-                    self.config["api_password_md5"] = saved_api_pwd2
+                if restore_api_pwd:
+                    self.config["api_password_md5"] = saved_api_pwd
             except Exception:
                 pass
             self.generation_status["is_generating"] = False
