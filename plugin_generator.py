@@ -15,6 +15,7 @@ from astrbot.api.event import AstrMessageEvent
 
 from .llm_handler import LLMHandler
 from .directory_detector import DirectoryDetector
+from .quality_checker import QualityChecker
 from .utils import (
     sanitize_plugin_name, 
     create_plugin_directory,
@@ -30,6 +31,7 @@ class PluginGenerator:
         self.config = config
         self.llm_handler = LLMHandler(context, config)
         self.directory_detector = DirectoryDetector()
+        self.quality_checker = QualityChecker(config, self.directory_detector)
         self.installer = installer
         self.logger = logger
         self.star = star
@@ -47,7 +49,7 @@ class PluginGenerator:
                 "生成插件文档",
                 "生成配置文件",
                 "生成插件代码",
-                "代码审查与修复",
+                "静态检查与代码审查",
                 "打包并安装插件"
             ]
         }
@@ -573,9 +575,16 @@ class PluginGenerator:
                     "error": error_msg
                 }
             
-            # 步骤5：代码审查与修复
+            # 步骤5：静态检查与代码审查
             self._update_status(5, plugin_name)
             await event.send(event.plain_result(self._build_step_message()))
+            quality_outcome = await self._ensure_quality_checks(code, plugin_name, event)
+            if not quality_outcome["success"]:
+                return {
+                    "success": False,
+                    "error": quality_outcome.get("error", "静态检查未通过")
+                }
+            code = quality_outcome["code"]
             self.logger.info(f"开始代码审查: {plugin_name}")
             review_result = normalize_review_result(await self._review_code_with_retry(code, metadata, markdown_doc))
             satisfaction_threshold = self.config.get("satisfaction_threshold", 80)
@@ -833,9 +842,16 @@ class PluginGenerator:
                     "error": error_msg
                 }
             
-            # 步骤5：代码审查与修复
+            # 步骤5：静态检查与代码审查
             self._update_status(5, plugin_name)
             await event.send(event.plain_result(self._build_step_message()))
+            quality_outcome = await self._ensure_quality_checks(code, plugin_name, event)
+            if not quality_outcome["success"]:
+                return {
+                    "success": False,
+                    "error": quality_outcome.get("error", "静态检查未通过")
+                }
+            code = quality_outcome["code"]
             self.logger.info(f"开始代码审查: {plugin_name}")
             
             def normalize_review_result(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -1009,6 +1025,96 @@ class PluginGenerator:
             "issues": ["代码审查失败"],
             "suggestions": ["请检查代码并重试"]
         }
+        
+    async def _ensure_quality_checks(self, code: str, plugin_name: str, event: Optional[AstrMessageEvent]) -> Dict[str, Any]:
+        """运行本地静态检查并在必要时调用LLM进行自动修复。"""
+        settings = self.quality_checker.resolve_settings()
+        if not settings.get("enabled", True):
+            self.logger.info("静态检查已禁用，跳过质量检查: %s", plugin_name)
+            return {"success": True, "code": code}
+        
+        active_tools = [
+            name for name in ("ruff", "pylint", "mypy")
+            if settings.get(f"run_{name}", True)
+        ]
+        if not active_tools:
+            message = "静态检查未启用任何工具，已跳过"
+            self.logger.info("%s -> %s", plugin_name, message)
+            if event:
+                await event.send(event.plain_result(message))
+            return {"success": True, "code": code}
+        
+        tools_label = ", ".join(active_tools)
+        self.logger.info("开始静态检查 (%s): %s", tools_label, plugin_name)
+        if event:
+            await event.send(event.plain_result(f"正在执行静态代码检查（{tools_label}）..."))
+        
+        max_retries = settings.get("max_retries", 2)
+        unlimited = max_retries == -1
+        attempt = 0
+        
+        try:
+            result = await self.quality_checker.run_checks(code, plugin_name, settings=settings)
+        except Exception as exc:  # pylint: disable=broad-except
+            error_msg = f"静态检查执行失败：{exc}"
+            self.logger.error(error_msg)
+            if event:
+                await event.send(event.plain_result(error_msg))
+            return {"success": False, "error": error_msg}
+        
+        if result.get("warnings"):
+            for warning in result["warnings"]:
+                if event:
+                    await event.send(event.plain_result(warning))
+        
+        while (not result["success"]) and (unlimited or attempt < max_retries):
+            if not result.get("issues"):
+                break
+            attempt += 1
+            failed_tools = ", ".join(result.get("failed_tools", [])) or "静态检查"
+            if event:
+                await event.send(event.plain_result(f"{failed_tools} 未通过，正在请求LLM修复（第{attempt}次尝试）..."))
+            try:
+                code = await self.llm_handler.fix_plugin_code(
+                    code,
+                    result.get("issues", []),
+                    result.get("suggestions", []),
+                )
+            except Exception as exc:  # pylint: disable=broad-except
+                self.logger.error("静态检查修复失败：%s", exc)
+                error_msg = f"静态检查修复失败：{exc}"
+                if event:
+                    await event.send(event.plain_result(error_msg))
+                return {"success": False, "error": error_msg}
+            
+            try:
+                result = await self.quality_checker.run_checks(code, plugin_name, settings=settings)
+            except Exception as exc:  # pylint: disable=broad-except
+                error_msg = f"静态检查执行失败：{exc}"
+                self.logger.error(error_msg)
+                if event:
+                    await event.send(event.plain_result(error_msg))
+                return {"success": False, "error": error_msg}
+            
+            if result.get("warnings"):
+                for warning in result["warnings"]:
+                    if event:
+                        await event.send(event.plain_result(warning))
+        
+        if not result["success"]:
+            summary = result.get("summary") or "静态检查未通过"
+            self.logger.warning("%s -> %s", plugin_name, summary)
+            if event:
+                await event.send(event.plain_result(summary))
+            return {"success": False, "error": summary}
+        
+        summary = result.get("summary")
+        if summary:
+            self.logger.info("%s -> %s", plugin_name, summary)
+            if event:
+                await event.send(event.plain_result(summary))
+        
+        return {"success": True, "code": code}
         
     async def _create_plugin_files(self, plugin_name: str, metadata: Dict[str, Any], code: str, markdown: str, config_schema: str = "", base_dir: Optional[str] = None) -> str:
         '''创建插件文件

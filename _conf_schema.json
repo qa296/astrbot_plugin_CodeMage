@@ -58,6 +58,85 @@
     "hint": "是否允许生成的插件包含外部依赖",
     "default": false
   },
+  "quality_checks": {
+    "description": "代码质量检查设置",
+    "type": "object",
+    "hint": "配置是否启用 ruff/pylint/mypy 静态检查以及超时和重试策略",
+    "items": {
+      "enabled": {
+        "description": "启用静态检查",
+        "type": "bool",
+        "hint": "关闭后将跳过所有静态检查步骤",
+        "default": true
+      },
+      "run_ruff": {
+        "description": "启用 ruff",
+        "type": "bool",
+        "hint": "是否运行 ruff lint 检查",
+        "default": true
+      },
+      "run_pylint": {
+        "description": "启用 pylint",
+        "type": "bool",
+        "hint": "是否运行 pylint 静态分析",
+        "default": true
+      },
+      "run_mypy": {
+        "description": "启用 mypy",
+        "type": "bool",
+        "hint": "是否运行 mypy 类型检查",
+        "default": true
+      },
+      "max_retries": {
+        "description": "最大自动修复次数",
+        "type": "int",
+        "hint": "静态检查失败时尝试让 LLM 修复的最大次数，-1 表示无限次",
+        "default": 2
+      },
+      "timeout": {
+        "description": "单次检查超时 (秒)",
+        "type": "int",
+        "hint": "每个检查进程的超时时间，单位为秒",
+        "default": 60
+      },
+      "ruff_args": {
+        "description": "ruff 额外参数",
+        "type": "string",
+        "hint": "附加到 ruff 命令的参数，使用空格分隔",
+        "default": ""
+      },
+      "pylint_args": {
+        "description": "pylint 额外参数",
+        "type": "string",
+        "hint": "附加到 pylint 命令的参数，使用空格分隔",
+        "default": ""
+      },
+      "mypy_args": {
+        "description": "mypy 额外参数",
+        "type": "string",
+        "hint": "附加到 mypy 命令的参数，使用空格分隔",
+        "default": ""
+      },
+      "ruff_config_path": {
+        "description": "ruff 配置文件路径",
+        "type": "string",
+        "hint": "可选，指定自定义 ruff 配置文件的绝对路径",
+        "default": ""
+      },
+      "pylint_rc_path": {
+        "description": "pylint 配置文件路径",
+        "type": "string",
+        "hint": "可选，指定自定义 pylintrc 文件的绝对路径",
+        "default": ""
+      },
+      "mypy_config_path": {
+        "description": "mypy 配置文件路径",
+        "type": "string",
+        "hint": "可选，指定自定义 mypy 配置文件的绝对路径",
+        "default": ""
+      }
+    }
+  },
   "install_method": {
     "description": "插件安装方式",
     "type": "string",

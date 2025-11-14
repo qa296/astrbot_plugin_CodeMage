@@ -33,6 +33,7 @@ CodeMage 是一个基于AI的 AstrBot 插件生成器，可以根据自然语言
 - 🔧 **自动化流程**: 自动生成插件元数据、文档和代码
 - 📦 **一键安装**: 生成后可直接安装到 AstrBot
 - 🔍 **代码审查**: 内置代码审查机制，确保生成质量
+- 🧹 **静态质量检查**: 集成 ruff、pylint、mypy，自动协助修复常见问题
 - 🔐 **安全过滤**: 防止生成恶意或不适当的内容
 
 ## 安装
@@ -67,9 +68,18 @@ git clone https://github.com/qa296/astrbot_plugin_codemage.git
 | `max_retries` | 插件生成失败时的最大重试次数 | `3` |
 | `enable_function_call` | 是否允许通过LLM函数调用生成插件 | `true` |
 | `allow_dependencies` | 是否允许生成的插件包含外部依赖 | `false` |
+| `quality_checks` | 静态代码检查设置，支持配置 ruff/pylint/mypy | 见子项 |
 | `astrbot_url` | AstrBot的API地址，用于安装插件 | `http://localhost:6185` |
 | `api_username` | AstrBot API的登录用户名 | `astrbot` |
 | `api_password_md5` | AstrBot API的登录密码（MD5加密） | 空 |
+
+`quality_checks` 支持以下常用字段：
+- `enabled`：是否开启静态检查（默认 `true`）
+- `run_ruff` / `run_pylint` / `run_mypy`：控制每个工具是否启用
+- `max_retries`：静态检查失败后自动请求 LLM 修复的最大次数，支持 `-1` 表示无限次
+- `timeout`：每个检查进程的超时时间，单位为秒
+- `ruff_args` / `pylint_args` / `mypy_args`：为对应命令追加的额外参数
+- `ruff_config_path` / `pylint_rc_path` / `mypy_config_path`：可选，自定义配置文件的绝对路径
 
 > 使用 `/密码转md5 your_password` 命令可以将明文密码转换为MD5格式
 
@@ -112,7 +122,7 @@ CodeMage 插件生成过程包括以下步骤:
 2. **元数据生成**: 生成插件的基本信息（名称、作者、版本等）
 3. **文档生成**: 创建插件的说明文档
 4. **代码生成**: 生成插件的核心代码
-5. **代码审查**: 对生成的代码进行质量检查和修复
+5. **静态检查与代码审查**: 运行 ruff/pylint/mypy 并结合 LLM 审查自动修复问题
 6. **打包安装**: 将插件打包并安装到 AstrBot
 
 ## 安全机制
