@@ -186,8 +186,50 @@ class PluginInstaller:
                 "error": str(e)
             }
             
+    async def uninstall_plugin(self, plugin_name: str) -> Dict[str, Any]:
+        """通过API卸载/删除插件（尝试多种兼容端点）
+        
+        Args:
+            plugin_name: 插件名称
+        Returns:
+            Dict[str, Any]
+        """
+        if not self.token:
+            if not await self.login():
+                return {"success": False, "error": "API登录失败"}
+        try:
+            import aiohttp
+            endpoints = [
+                "/api/plugin/uninstall",
+                "/api/plugin/delete",
+                "/api/plugin/remove",
+                "/api/plugin/unload",
+            ]
+            payloads = [
+                {"name": plugin_name},
+                {"plugin_name": plugin_name},
+                {"id": plugin_name},
+            ]
+            headers = {"Authorization": f"Bearer {self.token}"}
+            async with aiohttp.ClientSession() as session:
+                for ep in endpoints:
+                    url = f"{self.astrbot_url}{ep}"
+                    for body in payloads:
+                        try:
+                            async with session.post(url, json=body, headers=headers) as resp:
+                                data = await resp.json()
+                                if data.get("status") == "ok":
+                                    self.logger.info(f"✅ API已卸载插件 {plugin_name}")
+                                    return {"success": True}
+                        except Exception:
+                            # 尝试下一个端点/负载
+                            continue
+        except Exception as e:
+            self.logger.warning(f"调用卸载API失败: {e}")
+        return {"success": False, "error": "无法通过API卸载插件"}
+            
     async def check_plugin_install_status(self, plugin_name: str) -> Dict[str, Any]:
-        """检查插件安装状态和错误日志
+        """检查插件安装状态和错误日志（仅统计 ERRO/ERROR 级别且与目标插件相关的日志）
         
         Args:
             plugin_name: 插件名称
@@ -236,30 +278,30 @@ class PluginInstaller:
                                 level = log_entry.get('level', '').upper()
                                 module = ''
                             else:
-                                level = data.get('level', log_entry.get('level', '')).upper()
+                                level = (data.get('level') or log_entry.get('level', '') or '').upper()
                                 message = data.get('message', '')
                                 module = data.get('module', data.get('name', ''))
                                 
                             # 检查是否与插件相关
                             is_plugin_related = (
-                                'plugin' in module.lower() or 
-                                'star' in module.lower() or
-                                plugin_name.lower() in message.lower() or
-                                plugin_name.lower() in module.lower()
+                                'plugin' in (module or '').lower() or 
+                                'star' in (module or '').lower() or
+                                (plugin_name or '').lower() in (message or '').lower() or
+                                (plugin_name or '').lower() in (module or '').lower()
                             )
                             
                             if is_plugin_related:
-                                if level in ['ERROR', 'ERRO'] or 'error' in message.lower() or '失败' in message:
+                                if level in ['ERROR', 'ERRO']:
                                     error_logs.append(message)
-                                elif level == 'WARN' or 'warn' in message.lower():
+                                elif level == 'WARN' or 'warn' in (message or '').lower():
                                     warning_logs.append(message)
                                     
                         return {
                             "success": True,
                             "has_errors": len(error_logs) > 0,
                             "has_warnings": len(warning_logs) > 0,
-                            "error_logs": error_logs[:5],  # 最多返回5条
-                            "warning_logs": warning_logs[:5]
+                            "error_logs": error_logs[:10],  # 最多返回10条
+                            "warning_logs": warning_logs[:10]
                         }
                     else:
                         return {
