@@ -70,6 +70,18 @@ git clone https://github.com/qa296/astrbot_plugin_codemage.git
 | `astrbot_url` | AstrBot的API地址，用于安装插件 | `http://localhost:6185` |
 | `api_username` | AstrBot API的登录用户名 | `astrbot` |
 | `api_password_md5` | AstrBot API的登录密码（MD5加密） | 空 |
+| `enable_static_audit` | 是否启用静态代码审查（ruff + pylint + mypy + AstrBot专项规则） | `true` |
+| `enable_llm_audit` | 是否启用 LLM 审查（关闭则不进行LLM审查） | `true` |
+| `ruff_line_length` | Ruff 行宽限制 | `120` |
+| `ruff_select` | Ruff 启用规则（列表） | `[]` |
+| `ruff_ignore` | Ruff 忽略规则（列表） | `[]` |
+| `pylint_max_line_length` | Pylint 行宽限制 | `120` |
+| `pylint_disable` | Pylint 禁用规则（列表） | `[missing-module-docstring, missing-class-docstring, missing-function-docstring]` |
+| `pylint_enable` | Pylint 启用规则（列表） | `[]` |
+| `mypy_ignore_missing_imports` | Mypy 忽略缺失导入 | `true` |
+| `mypy_strict` | Mypy 严格模式 | `false` |
+
+> 注：除非同时关闭 `enable_static_audit` 和 `enable_llm_audit`，否则仍会执行“修复”步骤。该步骤不会新增任何新的流程步骤，只在原“代码审查与修复”环节中进行。
 
 > 使用 `/密码转md5 your_password` 命令可以将明文密码转换为MD5格式
 

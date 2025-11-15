@@ -82,5 +82,66 @@
     "type": "string",
     "hint": "AstrBot API的登录密码（MD5加密后的值）。使用 /密码转md5 指令转换明文密码",
     "default": ""
+  },
+
+  "enable_static_audit": {
+    "description": "启用静态代码审查",
+    "type": "bool",
+    "hint": "是否在生成代码后使用 ruff+pylint+mypy 进行静态审查（AstrBot 插件专项规则）",
+    "default": true
+  },
+  "enable_llm_audit": {
+    "description": "启用LLM审查",
+    "type": "bool",
+    "hint": "是否使用 LLM 进行语义与规范审查（关闭则不进行 LLM 审查）",
+    "default": true
+  },
+  "ruff_line_length": {
+    "description": "Ruff 行宽限制",
+    "type": "int",
+    "hint": "Ruff 的最大行宽设置",
+    "default": 120
+  },
+  "ruff_select": {
+    "description": "Ruff 启用规则",
+    "type": "list",
+    "hint": "Ruff 的 --select 列表，留空使用默认",
+    "default": []
+  },
+  "ruff_ignore": {
+    "description": "Ruff 忽略规则",
+    "type": "list",
+    "hint": "Ruff 的 --ignore 列表",
+    "default": []
+  },
+  "pylint_max_line_length": {
+    "description": "Pylint 行宽限制",
+    "type": "int",
+    "hint": "Pylint 的最大行宽设置",
+    "default": 120
+  },
+  "pylint_disable": {
+    "description": "Pylint 禁用规则",
+    "type": "list",
+    "hint": "需要禁用的 Pylint 规则编码（如 missing-module-docstring 等）",
+    "default": ["missing-module-docstring", "missing-class-docstring", "missing-function-docstring"]
+  },
+  "pylint_enable": {
+    "description": "Pylint 启用规则",
+    "type": "list",
+    "hint": "额外启用的 Pylint 规则编码",
+    "default": []
+  },
+  "mypy_ignore_missing_imports": {
+    "description": "Mypy 忽略缺失导入",
+    "type": "bool",
+    "hint": "启用后，mypy 将忽略第三方库的缺失类型提示",
+    "default": true
+  },
+  "mypy_strict": {
+    "description": "Mypy 严格模式",
+    "type": "bool",
+    "hint": "是否启用 mypy 严格模式",
+    "default": false
   }
 }
