@@ -20,6 +20,7 @@ from .utils import (
     create_plugin_directory,
     format_time
 )
+from .static_auditor import StaticCodeAuditor
 
 
 class PluginGenerator:
@@ -577,21 +578,22 @@ class PluginGenerator:
             self._update_status(5, plugin_name)
             await event.send(event.plain_result(self._build_step_message()))
             self.logger.info(f"开始代码审查: {plugin_name}")
-            review_result = normalize_review_result(await self._review_code_with_retry(code, metadata, markdown_doc))
+            review_result = await self._combined_review(code, metadata, markdown_doc)
             satisfaction_threshold = self.config.get("satisfaction_threshold", 80)
             strict_review = self.config.get("strict_review", True)
             max_retries = self.config.get("max_retries", 3)
             unlimited_retry = max_retries == -1
             retry_count = 0
+            llm_enabled = bool(self.config.get("enable_llm_review", True))
             
-            while ((review_result["satisfaction_score"] < satisfaction_threshold) or (not review_result["approved"])) and (unlimited_retry or retry_count < max_retries):
+            while ((review_result["satisfaction_score"] < satisfaction_threshold) or (not review_result["approved"])) and (unlimited_retry or retry_count < max_retries) and llm_enabled:
                 retry_count += 1
                 if strict_review and not review_result["approved"]:
                     await event.send(event.plain_result(f"代码审查未通过，正在修复（第{retry_count}次重试）..."))
                 else:
                     await event.send(event.plain_result(f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."))
                 code = await self.llm_handler.fix_plugin_code(code, review_result["issues"], review_result["suggestions"])
-                review_result = normalize_review_result(await self.llm_handler.review_plugin_code(code, metadata, markdown_doc))
+                review_result = await self._combined_review(code, metadata, markdown_doc)
             
             if (review_result["satisfaction_score"] < satisfaction_threshold) or (not review_result["approved"]):
                 reason = review_result.get("reason", "代码审查未通过")
@@ -873,21 +875,22 @@ class PluginGenerator:
                 result["suggestions"] = suggestions
                 return result
                 
-            review_result = normalize_review_result(await self._review_code_with_retry(code, metadata, markdown_doc))
+            review_result = await self._combined_review(code, metadata, markdown_doc)
             satisfaction_threshold = self.config.get("satisfaction_threshold", 80)
             strict_review = self.config.get("strict_review", True)
             max_retries = self.config.get("max_retries", 3)
             unlimited_retry = max_retries == -1
             retry_count = 0
+            llm_enabled = bool(self.config.get("enable_llm_review", True))
             
-            while ((review_result["satisfaction_score"] < satisfaction_threshold) or (not review_result["approved"])) and (unlimited_retry or retry_count < max_retries):
+            while ((review_result["satisfaction_score"] < satisfaction_threshold) or (not review_result["approved"])) and (unlimited_retry or retry_count < max_retries) and llm_enabled:
                 retry_count += 1
                 if strict_review and not review_result["approved"]:
                     await event.send(event.plain_result(f"代码审查未通过，正在修复（第{retry_count}次重试）..."))
                 else:
                     await event.send(event.plain_result(f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."))
                 code = await self.llm_handler.fix_plugin_code(code, review_result["issues"], review_result["suggestions"])
-                review_result = normalize_review_result(await self.llm_handler.review_plugin_code(code, metadata, markdown_doc))
+                review_result = await self._combined_review(code, metadata, markdown_doc)
             
             if (review_result["satisfaction_score"] < satisfaction_threshold) or (not review_result["approved"]):
                 reason = review_result.get("reason", "代码审查未通过")
@@ -1009,6 +1012,82 @@ class PluginGenerator:
             "issues": ["代码审查失败"],
             "suggestions": ["请检查代码并重试"]
         }
+
+    async def _combined_review(self, code: str, metadata: Dict[str, Any], markdown: str) -> Dict[str, Any]:
+        """综合审查：静态代码审查(ruff+pylint+mypy+AstrBot规则) + LLM审查(可选)
+
+        根据配置开关 enable_static_review / enable_llm_review 决定是否启用对应审查。
+        返回统一格式：approved, satisfaction_score, reason, issues, suggestions
+        """
+        enable_static = bool(self.config.get("enable_static_review", True))
+        enable_llm = bool(self.config.get("enable_llm_review", True))
+
+        # 缺省结果（全部通过）
+        combined = {
+            "approved": True,
+            "satisfaction_score": 100,
+            "reason": "",
+            "issues": [],
+            "suggestions": [],
+        }
+
+        # 运行静态审查
+        static_report = None
+        if enable_static:
+            try:
+                auditor = StaticCodeAuditor(self.config)
+                static_report = auditor.audit_code(code)
+                combined["approved"] = combined["approved"] and static_report.approved
+                combined["satisfaction_score"] = min(combined["satisfaction_score"], int(static_report.score))
+                combined["issues"].extend(static_report.issues)
+                combined["suggestions"].extend(static_report.suggestions)
+                if static_report.tools_missing:
+                    self.logger.info("静态审查工具缺失: " + ", ".join(static_report.tools_missing))
+            except Exception as e:
+                # 静态审查异常不应导致整体崩溃
+                self.logger.warning(f"静态代码审查失败: {str(e)}")
+
+        # 运行 LLM 审查
+        if enable_llm:
+            llm_result = await self._review_code_with_retry(code, metadata, markdown)
+            # 规范化
+            approved = bool(llm_result.get("approved", False))
+            score = llm_result.get("satisfaction_score")
+            try:
+                score = int(float(score)) if score is not None else 0
+            except Exception:
+                score = 0
+            reason = llm_result.get("reason") or ""
+            issues = llm_result.get("issues") or []
+            suggestions = llm_result.get("suggestions") or []
+            if isinstance(issues, str):
+                issues = [issues]
+            if isinstance(suggestions, str):
+                suggestions = [suggestions]
+
+            combined["approved"] = combined["approved"] and approved
+            combined["satisfaction_score"] = min(combined["satisfaction_score"], score if isinstance(score, int) else 0)
+            combined["issues"].extend(issues)
+            combined["suggestions"].extend(suggestions)
+            if reason:
+                combined["reason"] = reason if not combined["reason"] else combined["reason"] + "; " + reason
+
+        # 去重
+        def _dedup(xs: List[str]) -> List[str]:
+            seen = set()
+            out: List[str] = []
+            for x in xs:
+                if not isinstance(x, str):
+                    x = str(x)
+                if x not in seen:
+                    out.append(x)
+                    seen.add(x)
+            return out
+
+        combined["issues"] = _dedup(combined["issues"])
+        combined["suggestions"] = _dedup(combined["suggestions"])
+
+        return combined
         
     async def _create_plugin_files(self, plugin_name: str, metadata: Dict[str, Any], code: str, markdown: str, config_schema: str = "", base_dir: Optional[str] = None) -> str:
         '''创建插件文件
