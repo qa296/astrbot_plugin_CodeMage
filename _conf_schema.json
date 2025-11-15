@@ -82,5 +82,12 @@
     "type": "string",
     "hint": "AstrBot API的登录密码（MD5加密后的值）。使用 /密码转md5 指令转换明文密码",
     "default": ""
+  },
+  "lint_profile": {
+    "description": "静态代码审查配置",
+    "type": "string",
+    "hint": "使用 ruff + pylint + mypy 对生成的插件进行静态审查。只需一个配置项：选择审查强度。astrbot（默认）为专为AstrBot插件定制的规则集；basic仅运行ruff；strict运行全部工具并更严格；off关闭审查。",
+    "options": ["astrbot", "basic", "strict", "off"],
+    "default": "astrbot"
   }
 }

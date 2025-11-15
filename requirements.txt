@@ -1,0 +1,5 @@
+# Runtime deps for CodeMage and its static auditing tool
+aiohttp>=3.9.0
+ruff>=0.6.2
+pylint>=3.2.7
+mypy>=1.11.2

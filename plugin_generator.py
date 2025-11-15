@@ -15,6 +15,7 @@ from astrbot.api.event import AstrMessageEvent
 
 from .llm_handler import LLMHandler
 from .directory_detector import DirectoryDetector
+from .auditor import AstrPluginAuditor
 from .utils import (
     sanitize_plugin_name, 
     create_plugin_directory,
@@ -33,6 +34,13 @@ class PluginGenerator:
         self.installer = installer
         self.logger = logger
         self.star = star
+        
+        # 静态代码审查器（ruff + pylint + mypy）
+        try:
+            lint_profile = self.config.get("lint_profile", "astrbot")
+        except Exception:
+            lint_profile = "astrbot"
+        self.auditor = AstrPluginAuditor(lint_profile=lint_profile)
         
         # 生成状态
         self.generation_status = {
@@ -578,6 +586,16 @@ class PluginGenerator:
             await event.send(event.plain_result(self._build_step_message()))
             self.logger.info(f"开始代码审查: {plugin_name}")
             review_result = normalize_review_result(await self._review_code_with_retry(code, metadata, markdown_doc))
+            # 结合静态审查（ruff+pylint+mypy）结果
+            try:
+                static_report = await self.auditor.audit_code(code)
+                if not static_report.passed:
+                    review_result["approved"] = False
+                    review_result["reason"] = (review_result.get("reason") or "") + "; 静态审查未通过"
+                    review_result["issues"] = review_result.get("issues", []) + [f"[static] {i}" for i in static_report.issues]
+                    review_result["suggestions"] = review_result.get("suggestions", []) + static_report.suggestions
+            except Exception as e:
+                self.logger.warning(f"静态代码审查执行失败: {str(e)}")
             satisfaction_threshold = self.config.get("satisfaction_threshold", 80)
             strict_review = self.config.get("strict_review", True)
             max_retries = self.config.get("max_retries", 3)
@@ -592,6 +610,16 @@ class PluginGenerator:
                     await event.send(event.plain_result(f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."))
                 code = await self.llm_handler.fix_plugin_code(code, review_result["issues"], review_result["suggestions"])
                 review_result = normalize_review_result(await self.llm_handler.review_plugin_code(code, metadata, markdown_doc))
+                # 每次修复后继续融合静态审查结果
+                try:
+                    static_report = await self.auditor.audit_code(code)
+                    if not static_report.passed:
+                        review_result["approved"] = False
+                        review_result["reason"] = (review_result.get("reason") or "") + "; 静态审查未通过"
+                        review_result["issues"] = review_result.get("issues", []) + [f"[static] {i}" for i in static_report.issues]
+                        review_result["suggestions"] = review_result.get("suggestions", []) + static_report.suggestions
+                except Exception as e:
+                    self.logger.warning(f"静态代码审查执行失败: {str(e)}")
             
             if (review_result["satisfaction_score"] < satisfaction_threshold) or (not review_result["approved"]):
                 reason = review_result.get("reason", "代码审查未通过")
@@ -874,6 +902,16 @@ class PluginGenerator:
                 return result
                 
             review_result = normalize_review_result(await self._review_code_with_retry(code, metadata, markdown_doc))
+            # 结合静态审查（ruff+pylint+mypy）结果
+            try:
+                static_report = await self.auditor.audit_code(code)
+                if not static_report.passed:
+                    review_result["approved"] = False
+                    review_result["reason"] = (review_result.get("reason") or "") + "; 静态审查未通过"
+                    review_result["issues"] = review_result.get("issues", []) + [f"[static] {i}" for i in static_report.issues]
+                    review_result["suggestions"] = review_result.get("suggestions", []) + static_report.suggestions
+            except Exception as e:
+                self.logger.warning(f"静态代码审查执行失败: {str(e)}")
             satisfaction_threshold = self.config.get("satisfaction_threshold", 80)
             strict_review = self.config.get("strict_review", True)
             max_retries = self.config.get("max_retries", 3)
@@ -888,6 +926,16 @@ class PluginGenerator:
                     await event.send(event.plain_result(f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."))
                 code = await self.llm_handler.fix_plugin_code(code, review_result["issues"], review_result["suggestions"])
                 review_result = normalize_review_result(await self.llm_handler.review_plugin_code(code, metadata, markdown_doc))
+                # 每次修复后继续融合静态审查结果
+                try:
+                    static_report = await self.auditor.audit_code(code)
+                    if not static_report.passed:
+                        review_result["approved"] = False
+                        review_result["reason"] = (review_result.get("reason") or "") + "; 静态审查未通过"
+                        review_result["issues"] = review_result.get("issues", []) + [f"[static] {i}" for i in static_report.issues]
+                        review_result["suggestions"] = review_result.get("suggestions", []) + static_report.suggestions
+                except Exception as e:
+                    self.logger.warning(f"静态代码审查执行失败: {str(e)}")
             
             if (review_result["satisfaction_score"] < satisfaction_threshold) or (not review_result["approved"]):
                 reason = review_result.get("reason", "代码审查未通过")
