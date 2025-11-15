@@ -32,8 +32,12 @@ CodeMage 是一个基于AI的 AstrBot 插件生成器，可以根据自然语言
 - ⚡ **快速开发**: 将想法快速转化为可用插件
 - 🔧 **自动化流程**: 自动生成插件元数据、文档和代码
 - 📦 **一键安装**: 生成后可直接安装到 AstrBot
-- 🔍 **代码审查**: 内置代码审查机制，确保生成质量
+- 🔍 **多重代码审查**: 
+  - 静态分析 (Ruff + Pylint + Mypy)
+  - LLM智能审查
+  - AstrBot专用规范检查
 - 🔐 **安全过滤**: 防止生成恶意或不适当的内容
+- 🎯 **深度适配**: 专门针对AstrBot插件开发规范优化
 
 ## 安装
 
@@ -64,6 +68,7 @@ git clone https://github.com/qa296/astrbot_plugin_codemage.git
 | `step_by_step` | 是否使用分步生成模式 | `true` |
 | `satisfaction_threshold` | 插件审查通过的最低满意度分数（0-100） | `80` |
 | `strict_review` | 是否启用严格审查模式 | `true` |
+| `enable_static_analysis` | 是否启用静态代码分析（ruff/pylint/mypy） | `true` |
 | `max_retries` | 插件生成失败时的最大重试次数 | `3` |
 | `enable_function_call` | 是否允许通过LLM函数调用生成插件 | `true` |
 | `allow_dependencies` | 是否允许生成的插件包含外部依赖 | `false` |
@@ -113,14 +118,36 @@ CodeMage 插件生成过程包括以下步骤:
 3. **文档生成**: 创建插件的说明文档
 4. **代码生成**: 生成插件的核心代码
 5. **代码审查**: 对生成的代码进行质量检查和修复
+   - **静态分析**: Ruff检查代码风格，Pylint评估代码质量，Mypy检查类型安全
+   - **LLM审查**: AI深度分析代码逻辑、安全性和功能完整性
+   - **AstrBot规范**: 检查是否符合AstrBot插件开发规范
 6. **打包安装**: 将插件打包并安装到 AstrBot
+
+## AstrBot代码审查器
+
+CodeMage 集成了专门为 AstrBot 设计的代码审查器，使用 `ruff`、`pylint` 和 `mypy` 进行静态分析，并结合 LLM 智能审查。
+
+### 检查内容
+
+- ✅ Python代码规范 (PEP 8)
+- ✅ 类型安全检查
+- ✅ 代码质量评分
+- ✅ AstrBot特定规范:
+  - 必须使用 `from astrbot.api import logger`
+  - 不建议使用同步的 `requests` 库
+  - 正确的插件类结构和装饰器使用
+  - 正确的事件处理器签名
+  - 数据持久化路径规范
+
+详见 [ASTRBOT_CODE_AUDITOR.md](ASTRBOT_CODE_AUDITOR.md)
 
 ## 安全机制
 
 - 反向提示词过滤，防止生成恶意内容
-- 代码审查机制，确保生成代码的安全性
+- 多重代码审查机制，确保生成代码的安全性
 - 管理员权限控制，限制插件生成权限
 - 严格的依赖控制，默认不允许外部依赖
+- 静态分析工具检测潜在安全问题
 
 ## 贡献
 

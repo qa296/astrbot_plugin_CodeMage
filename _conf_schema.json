@@ -40,6 +40,12 @@
     "hint": "是否启用严格审查模式，审查失败时强制拒绝",
     "default": true
   },
+  "enable_static_analysis": {
+    "description": "启用静态代码分析",
+    "type": "bool",
+    "hint": "是否使用ruff、pylint、mypy进行静态代码分析。启用后可以更严格地检查代码质量、类型安全和AstrBot规范",
+    "default": true
+  },
   "max_retries": {
     "description": "最大重试次数",
     "type": "int",

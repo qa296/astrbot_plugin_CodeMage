@@ -976,7 +976,7 @@ class PluginGenerator:
     async def _review_code_with_retry(self, code: str, metadata: Dict[str, Any],
                                     markdown: str,
                                     max_retries: int = 3) -> Dict[str, Any]:
-        '''带重试的代码审查
+        '''带重试的代码审查（综合静态分析和LLM审查）
         
         Args:
             code: 插件代码
@@ -987,9 +987,19 @@ class PluginGenerator:
         Returns:
             Dict[str, Any]: 审查结果
         '''
+        # 检查是否启用静态分析
+        enable_static_analysis = self.config.get("enable_static_analysis", True)
+        
         for attempt in range(max_retries):
             try:
-                return await self.llm_handler.review_plugin_code(code, metadata, markdown)
+                # 使用综合审查方法（静态分析 + LLM审查）
+                return await self.llm_handler.comprehensive_review(
+                    code, 
+                    metadata, 
+                    markdown,
+                    file_name="main.py",
+                    enable_static_analysis=enable_static_analysis
+                )
             except Exception as e:
                 self.logger.error(f"代码审查失败（尝试 {attempt + 1}/{max_retries}）：{str(e)}")
                 if attempt == max_retries - 1:

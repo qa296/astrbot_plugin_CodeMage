@@ -10,6 +10,7 @@ from astrbot.api import logger
 from astrbot.api.star import Context
 from astrbot.api import AstrBotConfig
 from .utils import extract_code_blocks, parse_json_response
+from .astrbot_code_auditor import AstrBotCodeAuditor
 
 
 class LLMHandler:
@@ -22,6 +23,7 @@ class LLMHandler:
         self.negative_prompt = config.get("negative_prompt", "")
         self.logger = logger
         self._dev_docs_cache: Optional[str] = None
+        self.code_auditor = AstrBotCodeAuditor()
         
     async def call_llm(self, prompt: str, system_prompt: str = "", 
                       expect_json: bool = False) -> str:
@@ -798,3 +800,174 @@ class LLMHandler:
                 return result
         
         raise ValueError("无法修改插件元数据")
+    
+    async def comprehensive_review(self, code: str, metadata: Dict[str, Any],
+                                 markdown: str, file_name: str = "main.py",
+                                 enable_static_analysis: bool = True) -> Dict[str, Any]:
+        """综合审查插件代码（静态分析 + LLM审查）
+        
+        Args:
+            code: 插件代码
+            metadata: 插件元数据
+            markdown: Markdown文档
+            file_name: 文件名
+            enable_static_analysis: 是否启用静态分析（ruff/pylint/mypy）
+            
+        Returns:
+            Dict[str, Any]: 综合审查结果
+        """
+        results = {
+            "approved": True,
+            "satisfaction_score": 100,
+            "reason": "",
+            "issues": [],
+            "suggestions": [],
+            "static_analysis": None,
+            "llm_review": None
+        }
+        
+        # 1. 静态分析审查
+        if enable_static_analysis:
+            logger.info("开始静态代码分析（ruff + pylint + mypy）...")
+            try:
+                static_result = self.code_auditor.audit_code(code, file_name)
+                results["static_analysis"] = static_result
+                
+                # 合并静态分析的问题
+                if static_result.get("issues"):
+                    results["issues"].extend(static_result["issues"])
+                
+                # 静态分析不通过则整体不通过
+                if not static_result.get("approved", False):
+                    results["approved"] = False
+                
+                # 使用静态分析的满意度分数作为基础
+                results["satisfaction_score"] = static_result.get("satisfaction_score", 60)
+                
+                logger.info(f"静态分析完成 - 通过: {static_result.get('approved')}, "
+                          f"满意度: {static_result.get('satisfaction_score')}/100, "
+                          f"问题数: {len(static_result.get('issues', []))}")
+                
+            except Exception as e:
+                logger.error(f"静态分析审查失败: {str(e)}")
+                results["issues"].append(f"[静态分析错误] {str(e)}")
+                results["approved"] = False
+                results["satisfaction_score"] = 50
+        
+        # 2. LLM审查
+        logger.info("开始LLM代码审查...")
+        try:
+            llm_result = await self.review_plugin_code(code, metadata, markdown)
+            results["llm_review"] = llm_result
+            
+            # 合并LLM审查的问题和建议
+            if llm_result.get("issues"):
+                # 过滤掉与静态分析重复的问题
+                for issue in llm_result["issues"]:
+                    if issue not in results["issues"]:
+                        results["issues"].append(f"[LLM审查] {issue}")
+            
+            if llm_result.get("suggestions"):
+                results["suggestions"].extend(llm_result["suggestions"])
+            
+            # LLM审查不通过则整体不通过
+            if not llm_result.get("approved", False):
+                results["approved"] = False
+            
+            # 综合评分：静态分析60% + LLM审查40%
+            llm_score = llm_result.get("satisfaction_score", 60)
+            if enable_static_analysis:
+                static_score = results["satisfaction_score"]
+                results["satisfaction_score"] = int(static_score * 0.6 + llm_score * 0.4)
+            else:
+                results["satisfaction_score"] = llm_score
+            
+            logger.info(f"LLM审查完成 - 通过: {llm_result.get('approved')}, "
+                       f"满意度: {llm_score}/100")
+            
+        except Exception as e:
+            logger.error(f"LLM审查失败: {str(e)}")
+            results["issues"].append(f"[LLM审查错误] {str(e)}")
+            # LLM审查失败不影响整体结果，因为静态分析已经完成
+            if not enable_static_analysis:
+                results["approved"] = False
+                results["satisfaction_score"] = 30
+        
+        # 3. 生成综合审查理由
+        results["reason"] = self._generate_comprehensive_reason(results)
+        
+        logger.info(f"综合审查完成 - 最终通过: {results['approved']}, "
+                   f"最终满意度: {results['satisfaction_score']}/100, "
+                   f"总问题数: {len(results['issues'])}")
+        
+        return results
+    
+    def _generate_comprehensive_reason(self, results: Dict[str, Any]) -> str:
+        """生成综合审查理由
+        
+        Args:
+            results: 审查结果
+            
+        Returns:
+            str: 综合理由
+        """
+        score = results["satisfaction_score"]
+        approved = results["approved"]
+        issue_count = len(results["issues"])
+        
+        reason_parts = []
+        
+        # 静态分析部分
+        if results.get("static_analysis"):
+            static = results["static_analysis"]
+            static_status = []
+            if static.get("ruff_passed"):
+                static_status.append("✓ Ruff")
+            else:
+                static_status.append("✗ Ruff")
+            
+            if static.get("pylint_passed"):
+                static_status.append(f"✓ Pylint({static.get('pylint_score', 0):.1f}/10)")
+            else:
+                static_status.append(f"✗ Pylint({static.get('pylint_score', 0):.1f}/10)")
+            
+            if static.get("mypy_passed"):
+                static_status.append("✓ Mypy")
+            else:
+                static_status.append("✗ Mypy")
+            
+            if static.get("astrbot_rules_passed"):
+                static_status.append("✓ AstrBot规则")
+            else:
+                static_status.append("✗ AstrBot规则")
+            
+            reason_parts.append(f"静态分析: {', '.join(static_status)}")
+        
+        # LLM审查部分
+        if results.get("llm_review"):
+            llm = results["llm_review"]
+            llm_approved = "通过" if llm.get("approved") else "不通过"
+            reason_parts.append(f"LLM审查: {llm_approved}")
+        
+        # 综合评价
+        if approved:
+            if score >= 90:
+                grade = "优秀"
+                comment = "代码质量优秀，符合所有标准"
+            elif score >= 80:
+                grade = "良好"
+                comment = "代码质量良好，有少量问题但不影响使用"
+            elif score >= 70:
+                grade = "一般"
+                comment = "代码基本合格，建议优化"
+            else:
+                grade = "及格"
+                comment = "代码勉强合格，建议重点改进"
+        else:
+            grade = "不合格"
+            comment = f"代码存在 {issue_count} 个问题需要修复"
+        
+        reason_parts.append(f"综合评分: {score}/100 ({grade})")
+        reason_parts.append(comment)
+        
+        return " | ".join(reason_parts)

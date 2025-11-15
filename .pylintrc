@@ -1,0 +1,132 @@
+# Pylint configuration for AstrBot plugin development
+# https://pylint.readthedocs.io/
+
+[MASTER]
+# Python version
+py-version=3.10
+
+# Use multiple processes for faster checking
+jobs=1
+
+# Pickle collected data for later comparisons
+persistent=yes
+
+# List of plugins
+load-plugins=
+
+# Ignore patterns
+ignore=.git,.venv,__pycache__,build,dist
+
+# Ignore paths
+ignore-paths=
+
+[MESSAGES CONTROL]
+# Disable specific warnings and errors
+disable=
+    # Format-related (handled by ruff/black)
+    line-too-long,
+    bad-indentation,
+    trailing-whitespace,
+    missing-final-newline,
+    
+    # Documentation
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    
+    # Too strict
+    too-few-public-methods,
+    too-many-instance-attributes,
+    too-many-arguments,
+    too-many-locals,
+    too-many-branches,
+    too-many-statements,
+    too-many-return-statements,
+    too-many-public-methods,
+    
+    # Async-related false positives
+    no-member,
+    
+    # Import-related
+    import-outside-toplevel,
+    cyclic-import,
+    
+    # Other
+    fixme,
+    broad-except,
+    global-statement,
+    invalid-name,
+    redefined-outer-name,
+    redefined-builtin,
+    protected-access,
+    attribute-defined-outside-init,
+    
+    # Disable some checks that conflict with async patterns
+    inconsistent-return-statements,
+    unsubscriptable-object,
+    unsupported-assignment-operation,
+    no-self-argument
+
+# Enable specific checks
+enable=
+    use-symbolic-message-instead
+
+[REPORTS]
+# Output format
+output-format=text
+
+# Report score
+score=yes
+
+[BASIC]
+# Naming conventions
+good-names=i,j,k,ex,Run,_,id,qq,db,f,e
+
+# Regular expressions for naming
+argument-naming-style=snake_case
+attr-naming-style=snake_case
+class-attribute-naming-style=any
+class-const-naming-style=UPPER_CASE
+class-naming-style=PascalCase
+const-naming-style=UPPER_CASE
+function-naming-style=snake_case
+inlinevar-naming-style=any
+method-naming-style=snake_case
+module-naming-style=snake_case
+variable-naming-style=snake_case
+
+[FORMAT]
+# Maximum line length
+max-line-length=100
+
+# String quote preference
+string-quote=double-avoid-escape
+
+[DESIGN]
+# Maximum complexity
+max-complexity=15
+
+[IMPORTS]
+# Deprecated modules
+deprecated-modules=optparse,tkinter.tix
+
+[EXCEPTIONS]
+# Exceptions that should be caught
+overgeneral-exceptions=builtins.Exception
+
+[TYPING]
+# Runtime typing
+runtime-typing=yes
+
+[SIMILARITIES]
+# Minimum lines number of a similarity
+min-similarity-lines=10
+
+# Ignore comments when computing similarities
+ignore-comments=yes
+
+# Ignore docstrings when computing similarities
+ignore-docstrings=yes
+
+# Ignore imports when computing similarities
+ignore-imports=yes

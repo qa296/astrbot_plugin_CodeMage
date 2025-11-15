@@ -1,0 +1,78 @@
+# Ruff configuration for AstrBot plugin development
+# https://docs.astral.sh/ruff/
+
+# Target Python 3.10
+target-version = "py310"
+
+# Set line length
+line-length = 100
+
+# Enable specific rule sets
+[lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "YTT",    # flake8-2020
+    "ASYNC",  # flake8-async
+    "S",      # flake8-bandit (security)
+    "B",      # flake8-bugbear
+    "A",      # flake8-builtins
+    "C4",     # flake8-comprehensions
+    "T10",    # flake8-debugger
+    "EXE",    # flake8-executable
+    "ISC",    # flake8-implicit-str-concat
+    "PIE",    # flake8-pie
+    "T20",    # flake8-print
+    "PT",     # flake8-pytest-style
+    "Q",      # flake8-quotes
+    "RSE",    # flake8-raise
+    "RET",    # flake8-return
+    "SIM",    # flake8-simplify
+    "ARG",    # flake8-unused-arguments
+    "PTH",    # flake8-use-pathlib
+    "PL",     # pylint
+    "TRY",    # tryceratops
+    "RUF",    # ruff-specific rules
+]
+
+ignore = [
+    "E501",    # line-too-long (handled by formatter)
+    "S101",    # assert-used (common in tests)
+    "S311",    # suspicious-non-cryptographic-random-usage
+    "TRY003",  # raise-vanilla-args
+    "PLR0913", # too-many-arguments
+    "PLR0912", # too-many-branches
+    "PLR0915", # too-many-statements
+    "PLR2004", # magic-value-comparison
+    "B008",    # function-call-in-default-argument
+    "RUF012",  # mutable-class-default
+]
+
+# Exclude directories
+exclude = [
+    ".git",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "*.egg-info",
+]
+
+[lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Allow unused imports in __init__.py
+
+[lint.isort]
+known-first-party = ["astrbot"]
+
+[lint.flake8-quotes]
+inline-quotes = "double"
+multiline-quotes = "double"
+docstring-quotes = "double"
+
+[format]
+quote-style = "double"
+indent-style = "space"
