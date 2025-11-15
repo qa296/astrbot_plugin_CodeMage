@@ -58,11 +58,61 @@
     "hint": "是否允许生成的插件包含外部依赖",
     "default": false
   },
+  "enable_static_audit": {
+    "description": "启用静态代码审查",
+    "type": "bool",
+    "hint": "是否在代码审查阶段启用本地静态规则检查（专门适配AstrBot插件）",
+    "default": true
+  },
+  "enable_llm_audit": {
+    "description": "启用LLM审查",
+    "type": "bool",
+    "hint": "是否在代码审查阶段启用基于LLM的代码审查与自动修复",
+    "default": true
+  },
+  "static_audit_rules": {
+    "description": "静态审查规则集",
+    "type": "object",
+    "hint": "可针对项目进行个性化适配的静态规则配置",
+    "items": {
+      "require_logger_from_astrbot": {
+        "description": "要求使用 astrbot.api.logger",
+        "type": "bool",
+        "hint": "启用后将检查是否从 astrbot.api 导入 logger",
+        "default": true
+      },
+      "disallow_logging_module": {
+        "description": "禁止 logging 模块",
+        "type": "bool",
+        "hint": "启用后不允许 import logging 或使用 logging.*",
+        "default": true
+      },
+      "disallow_requests": {
+        "description": "禁止 requests 库",
+        "type": "bool",
+        "hint": "AstrBot 插件应使用 aiohttp/httpx 等异步库",
+        "default": true
+      },
+      "banned_dependencies": {
+        "description": "依赖黑名单",
+        "type": "list",
+        "hint": "requirements 中不允许出现的依赖包名称",
+        "default": [
+          "requests",
+          "loguru"
+        ]
+      }
+    }
+  },
   "install_method": {
     "description": "插件安装方式",
     "type": "string",
     "hint": "选择通过AstrBot API安装，或直接将文件放入本地插件目录。选择API需要正确配置用户名与MD5密码。",
-    "options": ["auto", "api", "file"],
+    "options": [
+      "auto",
+      "api",
+      "file"
+    ],
     "default": "auto"
   },
   "astrbot_url": {
