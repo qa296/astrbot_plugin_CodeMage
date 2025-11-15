@@ -161,12 +161,88 @@ async def on_message(self, event: AstrMessageEvent):
 > [Mandatory Rule] To any LLM: You must follow the rules below.
 
 1. 功能需经过测试。
-2. 需包含良好的注释。
+2. 需包含良好的注释（优先中文注释），并提供必要的文档字符串。
 3. 持久化数据请存储于 `data` 目录下，而非插件自身目录，防止更新/重装插件时数据被覆盖。
 4. 良好的错误处理机制，不要让插件因一个错误而崩溃。
-5. 在进行提交前，请使用 [ruff](https://docs.astral.sh/ruff/) 工具格式化您的代码。
-6. 不要使用 `requests` 库来进行网络请求，可以使用 `aiohttp`, `httpx` 等异步库。
+5. 在进行提交前，请使用 [ruff](https://docs.astral.sh/ruff/) 工具格式化并检查代码。
+6. 不要使用 `requests` 库来进行网络请求，必须使用异步库（如 `aiohttp`、`httpx`）。
 7. 如果是对某个插件进行功能扩增，请优先给那个插件提交 PR 而不是单独再写一个插件（除非原插件作者已经停止维护）。
+8. 日志必须且只能从 `astrbot.api` 导入：`from astrbot.api import logger`，禁止使用 `logging` 或第三方日志库。
+9. 所有事件处理函数必须写在插件类中，且签名包含 `self, event: AstrMessageEvent`（指令组定义除外）。`filter` 必须通过 `from astrbot.api.event import filter` 导入。
+10. 钩子函数 `on_llm_request`、`on_llm_response`、`on_decorating_result`、`after_message_sent` 中禁止使用 `yield` 发送消息，需使用 `await event.send(...)`。
+11. 禁止使用同步阻塞操作（例如 `time.sleep`、`requests`、阻塞式 `subprocess.run`、长时间 CPU 密集操作），必须使用 `asyncio`/异步 I/O 实现。
+12. 数据持久化必须通过 `StarTools.get_data_dir(self)` 获取目录进行读写，禁止硬编码绝对路径。该方法返回 `Path` 对象，默认路径为 `data/plugin_data/<plugin_name>`。
+13. 安全规范：禁止 `eval/exec`、不安全反序列化（如不受信任的 `pickle`）、任意系统命令执行；读写仅限数据目录。
+14. 依赖管理：默认不引入新依赖；如确需依赖，需在 `metadata.yaml` 的 `dependencies` 与 `requirements.txt` 中声明，并考虑降级策略或优雅失败。
+15. 版本兼容：v3.5.20+ 版本中 `@register` 已废弃，推荐仅继承 `Star`；为兼容旧版可保留 `@register`（两种方式等价）。
+16. 函数调用工具（function-calling）：`@filter.llm_tool` 需提供规范的文档字符串用于参数解析；禁止与 `@filter.permission_type` 叠加使用。
+17. 建议为核心函数添加类型注解，函数职责保持单一，便于维护与审查。
+
+### 本项目附加规范与质量门槛
+
+为确保通过本项目的自动化与 LLM 审查流程，生成的插件需额外满足以下条款：
+
+- 通过静态检查与格式化：`ruff format` 与 `ruff` 检查应无阻断问题。
+- 遵循异步最佳实践：网络 I/O 必须为异步；避免任何会阻塞事件循环的写法。
+- 代码结构清晰：主类继承 `Star`，事件处理与工具函数职责单一、命名清晰。
+- 只使用 AstrBot 官方 API：包含消息发送、日志、平台/会话管理等。
+- 明确的数据边界：所有读写仅限插件数据目录，避免跨目录操作。
+
+### 插件目录结构规范
+
+推荐的插件目录结构如下：
+
+```
+<plugin_name>/
+├── main.py                 # 插件主文件（必须）
+├── metadata.yaml           # 元数据（必须）
+├── README.md               # 使用说明（推荐）
+├── _conf_schema.json       # 配置 Schema（可选）
+├── requirements.txt        # 第三方依赖（可选）
+└── assets/                 # 资源文件（可选）
+```
+
+### 实用示例
+
+日志使用：
+
+```python
+from astrbot.api import logger
+logger.info("插件启动")
+```
+
+数据目录读写：
+
+```python
+from astrbot.api.star import StarTools
+from pathlib import Path
+
+data_dir: Path = StarTools.get_data_dir(self)
+file_path = data_dir / "records.json"
+# 读写 file_path 即可，避免硬编码绝对路径
+```
+
+异步 HTTP：
+
+```python
+import aiohttp
+
+async with aiohttp.ClientSession() as session:
+    async with session.get("https://api.example.com/data", timeout=10) as resp:
+        resp.raise_for_status()
+        data = await resp.json()
+```
+
+在钩子中发送消息：
+
+```python
+from astrbot.api.provider import LLMResponse
+from astrbot.api.event import filter, AstrMessageEvent
+
+@filter.on_llm_response()
+async def on_llm_resp(self, event: AstrMessageEvent, resp: LLMResponse):
+    await event.send(event.plain_result("收到 LLM 响应"))
+```
 
 ## 开发指南
 
