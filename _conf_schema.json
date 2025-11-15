@@ -1,86 +1,8 @@
 {
-  "llm_provider_id": {
-    "description": "LLM提供商ID",
-    "type": "string",
-    "hint": "用于生成插件的LLM提供商ID，需要在AstrBot中配置"
-  },
-  "admin_only": {
-    "description": "仅管理员可用",
+  "static_code_audit": {
+    "description": "启用针对AstrBot插件的静态代码审查（ruff + pylint + mypy）",
     "type": "bool",
-    "hint": "是否限制只有管理员才能使用插件生成功能",
+    "hint": "开启后将对 LLM 生成的 main.py 执行 ruff/pylint/mypy 的静态检查并结合自定义规则进行报告（不阻断流程）",
     "default": true
-  },
-  "negative_prompt": {
-    "description": "反向提示词",
-    "type": "text",
-    "hint": "禁止生成的内容规则，用于安全过滤",
-    "default": "严格禁止进行任何网络请求，禁止生成涉及政治、暴力、色情、违法的内容（包括盗版、诈骗、赌博），禁止生成恶意代码（病毒、木马）、执行任何命令（eval、exec等）、进行文件系统操作（删除、篡改文件）或破坏系统，严禁任何侵犯用户隐私的行为，如窃取信息、监控、未经同意的数据收集，并禁止开发无实际功能的空壳插件、伪装插件以及违反国家网络安全法规的插件功能。"
-  },
-  "auto_approve": {
-    "description": "自动批准",
-    "type": "bool",
-    "hint": "是否自动批准生成的插件，跳过用户确认步骤",
-    "default": false
-  },
-  "step_by_step": {
-    "description": "分步生成",
-    "type": "bool",
-    "hint": "是否使用分步生成模式，将生成过程分为多个步骤",
-    "default": true
-  },
-  "satisfaction_threshold": {
-    "description": "满意度阈值",
-    "type": "int",
-    "hint": "插件审查通过的最低满意度分数（0-100）满意度评分标准：90-100分：优秀，可以直接使用 80-89分：良好，有小问题但不影响使用",
-    "default": 80
-  },
-  "strict_review": {
-    "description": "严格审查",
-    "type": "bool",
-    "hint": "是否启用严格审查模式，审查失败时强制拒绝",
-    "default": true
-  },
-  "max_retries": {
-    "description": "最大重试次数",
-    "type": "int",
-    "hint": "插件生成失败时的最大重试次数，-1为无限",
-    "default": 3
-  },
-  "enable_function_call": {
-    "description": "启用函数调用",
-    "type": "bool",
-    "hint": "是否允许通过LLM函数调用生成插件",
-    "default": true
-  },
-  "allow_dependencies": {
-    "description": "允许依赖",
-    "type": "bool",
-    "hint": "是否允许生成的插件包含外部依赖",
-    "default": false
-  },
-  "install_method": {
-    "description": "插件安装方式",
-    "type": "string",
-    "hint": "选择通过AstrBot API安装，或直接将文件放入本地插件目录。选择API需要正确配置用户名与MD5密码。",
-    "options": ["auto", "api", "file"],
-    "default": "auto"
-  },
-  "astrbot_url": {
-    "description": "AstrBot API地址",
-    "type": "string",
-    "hint": "AstrBot的API地址，用于安装插。一般情况下不用改。",
-    "default": "http://localhost:6185"
-  },
-  "api_username": {
-    "description": "API用户名",
-    "type": "string",
-    "hint": "AstrBot API的登录用户名",
-    "default": "astrbot"
-  },
-  "api_password_md5": {
-    "description": "API密码(MD5)",
-    "type": "string",
-    "hint": "AstrBot API的登录密码（MD5加密后的值）。使用 /密码转md5 指令转换明文密码",
-    "default": ""
   }
 }
