@@ -614,51 +614,117 @@ class PluginGenerator:
                 "installed": False
             }
             
-            # 尝试通过API安装插件
-            if self.installer and self.config.get("api_password_md5"):
+            # 尝试通过API安装插件（仅在选择/可用时进行错误检测与自动修复）
+            if use_api_install:
                 import tempfile
                 import shutil
+                import asyncio
                 await event.send(event.plain_result("正在通过API安装插件..."))
-                try:
+                install_method = self.config.get("install_method", "auto")
+                max_retries = self.config.get("max_retries", 3)
+                unlimited = max_retries == -1
+                attempt = 0
+                current_code = code
+                api_success_without_errors = False
+                while unlimited or attempt < max_retries:
+                    attempt += 1
                     temp_dir = tempfile.mkdtemp(prefix="codemage_plugin_")
+                    zip_path = None
                     try:
-                        plugin_path = await self._create_plugin_files(plugin_name, metadata, code, markdown_doc, config_schema, base_dir=temp_dir)
+                        plugin_path = await self._create_plugin_files(plugin_name, metadata, current_code, markdown_doc, config_schema, base_dir=temp_dir)
                         self.logger.info(f"插件已在临时目录生成: {plugin_name} -> {plugin_path}")
                         result["plugin_path"] = plugin_path
-                        
                         zip_path = await self.installer.create_plugin_zip(plugin_path)
-                        if zip_path:
-                            install_result = await self.installer.install_plugin(zip_path)
-                            result["installed"] = True
-                            result["install_success"] = install_result.get("success", False)
-                            if install_result.get("success"):
-                                await event.send(event.plain_result("✅ 插件已通过API安装"))
-                                status_check = await self.installer.check_plugin_install_status(plugin_name)
-                                if status_check.get("has_errors"):
-                                    error_msg = "⚠️ 插件安装后检测到错误：\n" + "\n".join(status_check.get("error_logs", []))
-                                    await event.send(event.plain_result(error_msg))
-                            else:
-                                result["install_error"] = install_result.get("error", "未知错误")
-                                await event.send(event.plain_result(f"❌ 插件安装失败: {install_result.get('error')}"))
-                            if os.path.exists(zip_path):
-                                os.remove(zip_path)
+                        if not zip_path:
+                            result["install_error"] = "打包失败"
+                            break
+                        # API 安装
+                        await event.send(event.plain_result("正在通过API安装插件..." if attempt == 1 else f"通过API安装重试第{attempt}次..."))
+                        install_result = await self.installer.install_plugin(zip_path)
+                        result["installed"] = True
+                        result["install_success"] = install_result.get("success", False)
+                        if not install_result.get("success"):
+                            # 安装失败：重试或回退
+                            result["install_error"] = install_result.get("error", "未知错误")
+                            self.logger.error(f"API 安装失败: {result['install_error']}")
+                            if not unlimited and attempt >= max_retries:
+                                break
+                            await asyncio.sleep(1)
+                            continue
+                        # 安装成功，检测 ERRO 级别错误
+                        status_check = await self.installer.detect_plugin_erro_logs(plugin_name)
+                        if not status_check.get("success"):
+                            # 无法获取日志，视为失败进入下一次重试
+                            self.logger.warning(f"获取日志失败：{status_check.get('errors')}")
+                            if not unlimited and attempt >= max_retries:
+                                break
+                            await asyncio.sleep(1)
+                            continue
+                        error_logs = status_check.get("errors", [])
+                        if error_logs:
+                            # 发现 ERRO：卸载并回退到审查修复
+                            await event.send(event.plain_result("检测到插件加载 ERRO 错误，正在回退到审查并尝试自动修复..."))
+                            remove_ret = await self.installer.remove_plugin(plugin_name)
+                            self.logger.warning(f"已尝试卸载/删除插件：{remove_ret}")
+                            try:
+                                suggestions = [
+                                    "根据上述错误日志修复代码，确保插件可被 AstrBot 正常导入与加载。",
+                                    "遵循 AstrBot 插件开发文档、避免异步生成器中带返回值、修正导入路径等典型错误。"
+                                ]
+                                current_code = await self.llm_handler.fix_plugin_code(current_code, error_logs, suggestions)
+                            except Exception as e:
+                                self.logger.error(f"LLM 修复代码失败: {str(e)}")
+                                if not unlimited and attempt >= max_retries:
+                                    break
+                                await asyncio.sleep(1)
+                                continue
+                            # 修复后继续下一轮重试
+                            await asyncio.sleep(1)
+                            continue
+                        else:
+                            api_success_without_errors = True
+                            await event.send(event.plain_result("✅ 插件已通过API安装且未检测到 ERRO 错误"))
+                            break
+                    except Exception as e:
+                        self.logger.error(f"安装插件失败: {str(e)}")
+                        result["install_error"] = str(e)
+                        if not unlimited and attempt >= max_retries:
+                            break
+                        await asyncio.sleep(1)
+                        continue
                     finally:
-                        if os.path.exists(temp_dir):
-                            shutil.rmtree(temp_dir)
-                            self.logger.info(f"已清理临时目录: {temp_dir}")
-                except Exception as e:
-                    self.logger.error(f"安装插件失败: {str(e)}")
-                    result["install_error"] = str(e)
-                    await event.send(event.plain_result(f"❌ 安装插件失败: {str(e)}"))
+                        try:
+                            if zip_path and os.path.exists(zip_path):
+                                os.remove(zip_path)
+                        except Exception:
+                            pass
+                        try:
+                            if os.path.exists(temp_dir):
+                                shutil.rmtree(temp_dir)
+                                self.logger.info(f"已清理临时目录: {temp_dir}")
+                        except Exception:
+                            pass
+                # 如果 API 未成功或持续报错，且为 auto 模式，则回退到文件安装
+                if not api_success_without_errors:
+                    if install_method == "auto":
+                        self.logger.info("API 安装失败或持续报错，回退到本地文件安装")
+                        plugin_path = await self._create_plugin_files(plugin_name, metadata, current_code, markdown_doc, config_schema)
+                        self.logger.info(f"插件生成成功: {plugin_name} -> {plugin_path}")
+                        result["plugin_path"] = plugin_path
+                        await event.send(event.plain_result(f"插件已在本地创建: {plugin_path}\n请手动重启AstrBot以加载插件"))
+                    else:
+                        # 非 auto 不回退
+                        if not result.get("install_error"):
+                            result["install_error"] = "API 安装失败或持续检测到 ERRO 错误"
             else:
                 self.logger.info("未配置API密码或installer，在本地创建插件文件")
                 plugin_path = await self._create_plugin_files(plugin_name, metadata, code, markdown_doc, config_schema)
                 self.logger.info(f"插件生成成功: {plugin_name} -> {plugin_path}")
                 result["plugin_path"] = plugin_path
                 await event.send(event.plain_result(f"插件已在本地创建: {plugin_path}\n请手动重启AstrBot以加载插件"))
-            
+
             return result
-            
+
         except Exception as e:
             self.logger.error(f"插件生成流程失败：{str(e)}")
             return {
@@ -676,14 +742,14 @@ class PluginGenerator:
             self.generation_status["current_step"] = 0
             self.generation_status["progress_percentage"] = 0
             self.generation_status["plugin_name"] = ""
-            
+
     def get_pending_generation(self) -> Dict[str, Any]:
         '''获取待确认的插件生成任务
-        
+
         Returns:
             Dict[str, Any]: 待确认任务信息
         '''
-        # 如内存中不存在，尝试从文件恢复
+
         if not self.pending_generation.get("active"):
             try:
                 self._load_pending_state()
@@ -910,42 +976,108 @@ class PluginGenerator:
                 "installed": False
             }
             
-            # 尝试通过API安装插件
+            # 尝试通过API安装插件（仅在选择/可用时进行错误检测与自动修复）
             if self.installer and self.config.get("api_password_md5"):
                 import tempfile
                 import shutil
+                import asyncio
                 await event.send(event.plain_result("正在通过API安装插件..."))
-                try:
+                install_method = self.config.get("install_method", "auto")
+                max_retries = self.config.get("max_retries", 3)
+                unlimited = max_retries == -1
+                attempt = 0
+                current_code = code
+                api_success_without_errors = False
+                while unlimited or attempt < max_retries:
+                    attempt += 1
                     temp_dir = tempfile.mkdtemp(prefix="codemage_plugin_")
+                    zip_path = None
                     try:
-                        plugin_path = await self._create_plugin_files(plugin_name, metadata, code, markdown_doc, config_schema, base_dir=temp_dir)
+                        plugin_path = await self._create_plugin_files(plugin_name, metadata, current_code, markdown_doc, config_schema, base_dir=temp_dir)
                         self.logger.info(f"插件已在临时目录生成: {plugin_name} -> {plugin_path}")
                         result["plugin_path"] = plugin_path
-                        
                         zip_path = await self.installer.create_plugin_zip(plugin_path)
-                        if zip_path:
-                            install_result = await self.installer.install_plugin(zip_path)
-                            result["installed"] = True
-                            result["install_success"] = install_result.get("success", False)
-                            if install_result.get("success"):
-                                await event.send(event.plain_result("✅ 插件已通过API安装"))
-                                status_check = await self.installer.check_plugin_install_status(plugin_name)
-                                if status_check.get("has_errors"):
-                                    error_msg = "⚠️ 插件安装后检测到错误：\n" + "\n".join(status_check.get("error_logs", []))
-                                    await event.send(event.plain_result(error_msg))
-                            else:
-                                result["install_error"] = install_result.get("error", "未知错误")
-                                await event.send(event.plain_result(f"❌ 插件安装失败: {install_result.get('error')}"))
-                            if os.path.exists(zip_path):
-                                os.remove(zip_path)
+                        if not zip_path:
+                            result["install_error"] = "打包失败"
+                            break
+                        # API 安装
+                        await event.send(event.plain_result("正在通过API安装插件..." if attempt == 1 else f"通过API安装重试第{attempt}次..."))
+                        install_result = await self.installer.install_plugin(zip_path)
+                        result["installed"] = True
+                        result["install_success"] = install_result.get("success", False)
+                        if not install_result.get("success"):
+                            # 安装失败：重试或回退
+                            result["install_error"] = install_result.get("error", "未知错误")
+                            self.logger.error(f"API 安装失败: {result['install_error']}")
+                            if not unlimited and attempt >= max_retries:
+                                break
+                            await asyncio.sleep(1)
+                            continue
+                        # 安装成功，检测 ERRO 级别错误
+                        status_check = await self.installer.detect_plugin_erro_logs(plugin_name)
+                        if not status_check.get("success"):
+                            # 无法获取日志，视为失败进入下一次重试
+                            self.logger.warning(f"获取日志失败：{status_check.get('errors')}")
+                            if not unlimited and attempt >= max_retries:
+                                break
+                            await asyncio.sleep(1)
+                            continue
+                        error_logs = status_check.get("errors", [])
+                        if error_logs:
+                            # 发现 ERRO：卸载并回退到审查修复
+                            await event.send(event.plain_result("检测到插件加载 ERRO 错误，正在回退到审查并尝试自动修复..."))
+                            remove_ret = await self.installer.remove_plugin(plugin_name)
+                            self.logger.warning(f"已尝试卸载/删除插件：{remove_ret}")
+                            try:
+                                suggestions = [
+                                    "根据上述错误日志修复代码，确保插件可被 AstrBot 正常导入与加载。",
+                                    "遵循 AstrBot 插件开发文档、避免异步生成器中带返回值、修正导入路径等典型错误。"
+                                ]
+                                current_code = await self.llm_handler.fix_plugin_code(current_code, error_logs, suggestions)
+                            except Exception as e:
+                                self.logger.error(f"LLM 修复代码失败: {str(e)}")
+                                if not unlimited and attempt >= max_retries:
+                                    break
+                                await asyncio.sleep(1)
+                                continue
+                            # 修复后继续下一轮重试
+                            await asyncio.sleep(1)
+                            continue
+                        else:
+                            api_success_without_errors = True
+                            await event.send(event.plain_result("✅ 插件已通过API安装且未检测到 ERRO 错误"))
+                            break
+                    except Exception as e:
+                        self.logger.error(f"安装插件失败: {str(e)}")
+                        result["install_error"] = str(e)
+                        if not unlimited and attempt >= max_retries:
+                            break
+                        await asyncio.sleep(1)
+                        continue
                     finally:
-                        if os.path.exists(temp_dir):
-                            shutil.rmtree(temp_dir)
-                            self.logger.info(f"已清理临时目录: {temp_dir}")
-                except Exception as e:
-                    self.logger.error(f"安装插件失败: {str(e)}")
-                    result["install_error"] = str(e)
-                    await event.send(event.plain_result(f"❌ 安装插件失败: {str(e)}"))
+                        try:
+                            if zip_path and os.path.exists(zip_path):
+                                os.remove(zip_path)
+                        except Exception:
+                            pass
+                        try:
+                            if os.path.exists(temp_dir):
+                                shutil.rmtree(temp_dir)
+                                self.logger.info(f"已清理临时目录: {temp_dir}")
+                        except Exception:
+                            pass
+                # 如果 API 未成功或持续报错，且为 auto 模式，则回退到文件安装
+                if not api_success_without_errors:
+                    if install_method == "auto":
+                        self.logger.info("API 安装失败或持续报错，回退到本地文件安装")
+                        plugin_path = await self._create_plugin_files(plugin_name, metadata, current_code, markdown_doc, config_schema)
+                        self.logger.info(f"插件生成成功: {plugin_name} -> {plugin_path}")
+                        result["plugin_path"] = plugin_path
+                        await event.send(event.plain_result(f"插件已在本地创建: {plugin_path}\n请手动重启AstrBot以加载插件"))
+                    else:
+                        # 非 auto 不回退
+                        if not result.get("install_error"):
+                            result["install_error"] = "API 安装失败或持续检测到 ERRO 错误"
             else:
                 self.logger.info("未配置API密码或installer，在本地创建插件文件")
                 plugin_path = await self._create_plugin_files(plugin_name, metadata, code, markdown_doc, config_schema)
