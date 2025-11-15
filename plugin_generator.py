@@ -20,6 +20,7 @@ from .utils import (
     create_plugin_directory,
     format_time
 )
+from .code_audit import AstrbotPluginAuditor
 
 
 class PluginGenerator:
@@ -33,7 +34,8 @@ class PluginGenerator:
         self.installer = installer
         self.logger = logger
         self.star = star
-        
+        self.auditor = AstrbotPluginAuditor(config)
+
         # 生成状态
         self.generation_status = {
             "is_generating": False,
@@ -355,6 +357,92 @@ class PluginGenerator:
                 except Exception:
                     await event.send(event.plain_result(cfg_text[:1800]))
 
+    async def _static_analyze_and_fix(self, code: str, event: Optional[AstrMessageEvent] = None) -> Dict[str, Any]:
+        """对代码进行静态审查，并在严格模式下尝试自动修复一次。
+
+        返回结构：
+        {
+            "code": 最终代码,
+            "audit": 审查结果(dict)
+        }
+        """
+        result: Dict[str, Any] = {"code": code, "audit": {}}
+        if not self.config.get("enable_static_analysis", True):
+            return result
+        try:
+            audit = await self.auditor.analyze_code(code)
+            audit_dict = {
+                "approved": audit.approved,
+                "satisfaction_score": audit.satisfaction_score,
+                "reason": audit.reason,
+                "issues": audit.issues,
+                "suggestions": audit.suggestions,
+                "tools": {k: {
+                    "available": v.available,
+                    "issue_count": len(v.issues)
+                } for k, v in audit.details.items()}
+            }
+            result["audit"] = audit_dict
+
+            # 提示用户静态审查结果
+            try:
+                if event is not None:
+                    msg = [
+                        f"静态审查完成（得分 {audit.satisfaction_score} / 100）",
+                    ]
+                    tool_summ = []
+                    for name, rep in audit.details.items():
+                        status = "可用" if rep.available else "不可用"
+                        tool_summ.append(f"{name}:{status}:{len(rep.issues)}项")
+                    if tool_summ:
+                        msg.append("工具摘要：" + ", ".join(tool_summ))
+                    if audit.issues:
+                        msg.append("发现问题：" + str(min(len(audit.issues), 10)) + "项（仅展示前10条）")
+                        preview = "\n".join(audit.issues[:10])
+                        msg.append(preview)
+                    await event.send(event.plain_result("\n".join(msg)))
+            except Exception:
+                pass
+
+            # 严格模式：如未通过则尝试自动修复一次
+            if not audit.approved and self.config.get("static_analysis_strict", True):
+                try:
+                    fix_issues = audit.issues[:50]  # 控制传给 LLM 的问题数量
+                    fix_sugs = audit.suggestions[:50]
+                    fixed = await self.llm_handler.fix_plugin_code(code, fix_issues, fix_sugs, max_retries=max(1, int(self.config.get("max_retries", 3))))
+                    # 重新审查一次
+                    audit2 = await self.auditor.analyze_code(fixed)
+                    audit2_dict = {
+                        "approved": audit2.approved,
+                        "satisfaction_score": audit2.satisfaction_score,
+                        "reason": audit2.reason,
+                        "issues": audit2.issues,
+                        "suggestions": audit2.suggestions,
+                        "tools": {k: {
+                            "available": v.available,
+                            "issue_count": len(v.issues)
+                        } for k, v in audit2.details.items()}
+                    }
+                    result["code"] = fixed
+                    result["audit"] = audit2_dict
+
+                    # 将对比信息告知用户
+                    try:
+                        if event is not None:
+                            await event.send(event.plain_result(
+                                f"已根据静态审查自动修复一次：分数 {audit.satisfaction_score} -> {audit2.satisfaction_score}"
+                            ))
+                    except Exception:
+                        pass
+                except Exception:
+                    # 自动修复失败亦不阻断流程
+                    pass
+        except Exception:
+            # 静态审查异常不应中断主流程
+            return result
+
+        return result
+
     async def generate_plugin_flow(self, description: str, event: AstrMessageEvent) -> Dict[str, Any]:
         '''执行完整的插件生成流程
         Args:
@@ -572,8 +660,13 @@ class PluginGenerator:
                     "success": False,
                     "error": error_msg
                 }
+
+            # 先运行一次本地静态审查（ruff / pylint / mypy / AstrBot 专项）并尝试自动修复
+            static_pack = await self._static_analyze_and_fix(code, event)
+            code = static_pack.get("code", code)
+            last_static_audit = static_pack.get("audit", {})
             
-            # 步骤5：代码审查与修复
+            # 步骤5：代码审查与修复（LLM 审查）
             self._update_status(5, plugin_name)
             await event.send(event.plain_result(self._build_step_message()))
             self.logger.info(f"开始代码审查: {plugin_name}")
@@ -599,6 +692,15 @@ class PluginGenerator:
                     "success": False,
                     "error": f"代码审查未通过：{reason}"
                 }
+
+            # 审查通过后，再次进行一次静态检查（严格模式下保证通过）
+            if self.config.get("enable_static_analysis", True) and self.config.get("static_analysis_strict", True):
+                final_audit = await self.auditor.analyze_code(code)
+                if not final_audit.approved:
+                    return {
+                        "success": False,
+                        "error": f"静态审查未通过：{final_audit.reason}"
+                    }
             
             await event.send(event.plain_result(f"代码审查通过，满意度得分：{review_result['satisfaction_score']}分"))
             
@@ -832,7 +934,11 @@ class PluginGenerator:
                     "success": False,
                     "error": error_msg
                 }
-            
+
+            # 先运行一次本地静态审查（ruff / pylint / mypy / AstrBot 专项）并尝试自动修复
+            static_pack = await self._static_analyze_and_fix(code, event)
+            code = static_pack.get("code", code)
+
             # 步骤5：代码审查与修复
             self._update_status(5, plugin_name)
             await event.send(event.plain_result(self._build_step_message()))
@@ -895,6 +1001,15 @@ class PluginGenerator:
                     "success": False,
                     "error": f"代码审查未通过：{reason}"
                 }
+
+            # 审查通过后，再次进行一次静态检查（严格模式下保证通过）
+            if self.config.get("enable_static_analysis", True) and self.config.get("static_analysis_strict", True):
+                final_audit = await self.auditor.analyze_code(code)
+                if not final_audit.approved:
+                    return {
+                        "success": False,
+                        "error": f"静态审查未通过：{final_audit.reason}"
+                    }
             
             await event.send(event.plain_result(f"代码审查通过，满意度得分：{review_result['satisfaction_score']}分"))
             

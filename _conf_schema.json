@@ -58,6 +58,36 @@
     "hint": "是否允许生成的插件包含外部依赖",
     "default": false
   },
+  "enable_static_analysis": {
+    "description": "启用本地静态审查",
+    "type": "bool",
+    "hint": "使用 ruff + pylint + mypy 对 LLM 生成的代码进行本地静态审查（环境缺失工具时自动跳过）",
+    "default": true
+  },
+  "static_analysis_strict": {
+    "description": "静态审查严格模式",
+    "type": "bool",
+    "hint": "若静态审查未通过则阻止继续，并尝试自动修复一次",
+    "default": true
+  },
+  "static_satisfaction_threshold": {
+    "description": "静态审查合格阈值",
+    "type": "int",
+    "hint": "静态审查得分达到该分数判定为通过（0-100）",
+    "default": 85
+  },
+  "enable_astrbot_checks": {
+    "description": "启用 AstrBot 专项规则",
+    "type": "bool",
+    "hint": "对 main.py 执行 AstrBot 插件规范的专项校验（如 logger / filter 导入、钩子签名等）",
+    "default": true
+  },
+  "static_tool_timeout": {
+    "description": "静态工具超时（秒）",
+    "type": "int",
+    "hint": "单个工具的最大执行时间，避免阻塞",
+    "default": 20
+  },
   "install_method": {
     "description": "插件安装方式",
     "type": "string",
