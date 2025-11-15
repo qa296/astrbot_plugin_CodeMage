@@ -20,6 +20,7 @@ from .utils import (
     create_plugin_directory,
     format_time
 )
+from .code_auditor import AstrBotPluginAuditor
 
 
 class PluginGenerator:
@@ -976,7 +977,7 @@ class PluginGenerator:
     async def _review_code_with_retry(self, code: str, metadata: Dict[str, Any],
                                     markdown: str,
                                     max_retries: int = 3) -> Dict[str, Any]:
-        '''带重试的代码审查
+        '''带重试的代码审查（集成 ruff + pylint + mypy 与 AstrBot 规则集）
         
         Args:
             code: 插件代码
@@ -985,29 +986,103 @@ class PluginGenerator:
             max_retries: 最大重试次数
             
         Returns:
-            Dict[str, Any]: 审查结果
+            Dict[str, Any]: 审查结果（已融合静态工具与LLM审查）
         '''
+        # 先运行 AstrBot 专用静态审查与 ruff/pylint/mypy（若可用）
+        static_auditor = AstrBotPluginAuditor()
+        static_result = static_auditor.audit(code)
+
+        # 再调用 LLM 审查，失败则退化为仅使用静态审查结果
+        last_err: Optional[Exception] = None
+        llm_result: Optional[Dict[str, Any]] = None
         for attempt in range(max_retries):
             try:
-                return await self.llm_handler.review_plugin_code(code, metadata, markdown)
+                llm_result = await self.llm_handler.review_plugin_code(code, metadata, markdown)
+                break
             except Exception as e:
+                last_err = e
                 self.logger.error(f"代码审查失败（尝试 {attempt + 1}/{max_retries}）：{str(e)}")
                 if attempt == max_retries - 1:
-                    # 返回一个默认的失败结果
-                    return {
-                        "approved": False,
-                        "satisfaction_score": 0,
-                        "reason": f"代码审查失败：{str(e)}",
-                        "issues": ["代码审查失败"],
-                        "suggestions": ["请检查代码并重试"]
-                    }
-                    
+                    break
+
+        if not llm_result:
+            # 仅返回静态审查结果
+            reason = static_result.reason
+            if last_err is not None and static_result.approved:
+                reason = f"静态审查通过；LLM审查失败：{last_err}（已采用静态结果）"
+            return {
+                "approved": static_result.approved,
+                "satisfaction_score": static_result.satisfaction_score,
+                "reason": reason,
+                "issues": static_result.issues,
+                "suggestions": static_result.suggestions,
+            }
+
+        # 规范化 LLM 审查结果中的字段
+        def _to_bool(x: Any) -> bool:
+            if isinstance(x, bool):
+                return x
+            if isinstance(x, (int, float)):
+                return bool(x)
+            if isinstance(x, str):
+                return x.strip().lower() in {"true", "yes", "y", "1", "同意", "通过", "approved"}
+            return False
+
+        def _to_int(x: Any, default: int = 0) -> int:
+            try:
+                return int(float(x))
+            except Exception:
+                return default
+
+        llm_approved = _to_bool(llm_result.get("approved", False))
+        llm_score = _to_int(llm_result.get("satisfaction_score", 0))
+        llm_reason = str(llm_result.get("reason", "")).strip()
+
+        llm_issues_raw = llm_result.get("issues", []) or []
+        if isinstance(llm_issues_raw, str):
+            llm_issues = [llm_issues_raw]
+        elif isinstance(llm_issues_raw, list):
+            llm_issues = [str(i) for i in llm_issues_raw]
+        else:
+            llm_issues = [str(llm_issues_raw)]
+
+        llm_sug_raw = llm_result.get("suggestions", []) or []
+        if isinstance(llm_sug_raw, str):
+            llm_suggestions = [llm_sug_raw]
+        elif isinstance(llm_sug_raw, list):
+            llm_suggestions = [str(i) for i in llm_sug_raw]
+        else:
+            llm_suggestions = [str(llm_sug_raw)]
+
+        # 融合：静态与 LLM
+        approved = static_result.approved and llm_approved
+        score = min(max(0, llm_score), static_result.satisfaction_score)
+        reason_parts = []
+        if llm_reason:
+            reason_parts.append(f"LLM: {llm_reason}")
+        if static_result.reason:
+            reason_parts.append(f"静态: {static_result.reason}")
+        reason = "；".join(reason_parts) or ("通过静态与LLM综合审查" if approved else "综合审查未通过")
+
+        # 合并问题与建议，去重保序
+        def _merge_list(a: List[str], b: List[str]) -> List[str]:
+            seen = set()
+            merged: List[str] = []
+            for item in a + b:
+                if item not in seen:
+                    merged.append(item)
+                    seen.add(item)
+            return merged
+
+        combined_issues = _merge_list(static_result.issues, llm_issues)
+        combined_suggestions = _merge_list(static_result.suggestions, llm_suggestions)
+
         return {
-            "approved": False,
-            "satisfaction_score": 0,
-            "reason": "代码审查失败",
-            "issues": ["代码审查失败"],
-            "suggestions": ["请检查代码并重试"]
+            "approved": approved,
+            "satisfaction_score": score,
+            "reason": reason,
+            "issues": combined_issues,
+            "suggestions": combined_suggestions,
         }
         
     async def _create_plugin_files(self, plugin_name: str, metadata: Dict[str, Any], code: str, markdown: str, config_schema: str = "", base_dir: Optional[str] = None) -> str:
