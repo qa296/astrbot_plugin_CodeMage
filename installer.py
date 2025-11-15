@@ -53,6 +53,85 @@ class PluginInstaller:
         except Exception as e:
             self.logger.error(f"❌ AstrBot API登录请求失败: {str(e)}")
             return False
+    
+    async def uninstall_plugin_api(self, plugin_name: str) -> Dict[str, Any]:
+        """通过 API 卸载插件
+        
+        Args:
+            plugin_name (str): 插件名称
+        
+        Returns:
+            Dict[str, Any]: 卸载结果
+        """
+        if not self.token:
+            if not await self.login():
+                return {"success": False, "error": "API登录失败"}
+        try:
+            import aiohttp
+            url = f"{self.astrbot_url}/api/plugin/uninstall"
+            headers = {"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"}
+            payload = {"name": plugin_name}
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, headers=headers) as resp:
+                    data = await resp.json()
+                    if data.get("status") == "ok":
+                        self.logger.info("✅ 插件已通过 API 卸载")
+                        return {"success": True, "message": data.get("message", "ok")}
+                    return {"success": False, "error": data.get("message", "卸载失败")}
+        except Exception as e:
+            self.logger.error(f"❌ 调用 API 卸载插件失败: {str(e)}")
+            return {"success": False, "error": str(e)}
+    
+    async def delete_plugin_files(self, plugin_name: str) -> Dict[str, Any]:
+        """删除本地插件目录
+        
+        如果 API 卸载失败，可回退到文件删除。
+        """
+        from .directory_detector import DirectoryDetector
+        import shutil
+        try:
+            dd = DirectoryDetector()
+            plugin_path = dd.get_plugin_path(plugin_name)
+            if not plugin_path:
+                return {"success": True, "message": "插件目录不存在或已删除"}
+            if not plugin_path or not os.path.exists(plugin_path):
+                return {"success": True, "message": "插件目录不存在或已删除"}
+            shutil.rmtree(plugin_path, ignore_errors=True)
+            if os.path.exists(plugin_path):
+                # 二次尝试：逐文件删除
+                for root, dirs, files in os.walk(plugin_path, topdown=False):
+                    for f in files:
+                        try:
+                            os.remove(os.path.join(root, f))
+                        except Exception:
+                            pass
+                    for d in dirs:
+                        try:
+                            os.rmdir(os.path.join(root, d))
+                        except Exception:
+                            pass
+                try:
+                    os.rmdir(plugin_path)
+                except Exception:
+                    pass
+            removed = not os.path.exists(plugin_path)
+            if removed:
+                self.logger.info(f"🧹 已删除本地插件目录: {plugin_path}")
+                return {"success": True, "message": "文件删除成功"}
+            return {"success": False, "error": "文件删除失败"}
+        except Exception as e:
+            self.logger.error(f"删除插件文件失败: {str(e)}")
+            return {"success": False, "error": str(e)}
+    
+    async def remove_plugin_mixed(self, plugin_name: str) -> Dict[str, Any]:
+        """混合卸载：优先 API 卸载，失败后尝试文件删除"""
+        api_res = await self.uninstall_plugin_api(plugin_name)
+        if api_res.get("success"):
+            return {"success": True, "method": "api", "message": api_res.get("message", "ok")}
+        file_res = await self.delete_plugin_files(plugin_name)
+        if file_res.get("success"):
+            return {"success": True, "method": "file", "message": file_res.get("message", "ok")}
+        return {"success": False, "error": api_res.get("error") or file_res.get("error") or "卸载失败"}
             
     async def create_plugin_zip(self, plugin_dir: str) -> Optional[str]:
         """将插件目录打包成zip文件
