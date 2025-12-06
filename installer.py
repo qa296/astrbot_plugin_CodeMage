@@ -4,6 +4,7 @@ CodeMage插件安装器模块
 """
 
 import os
+import re
 import zipfile
 import tempfile
 from typing import Dict, Any, Optional
@@ -13,6 +14,41 @@ from astrbot.api import AstrBotConfig
 
 class PluginInstaller:
     """插件安装器类"""
+    
+    _LOG_LEVEL_PATTERN = re.compile(r"\[([A-Za-z]+)\]")
+    _LEVEL_ALIAS = {"WARNING": "WARN", "ERROR": "ERRO"}
+
+    @classmethod
+    def _normalize_log_level(cls, level: Optional[str], message: Optional[str]) -> str:
+        normalized = (level or "").strip().upper()
+        if normalized in {"DEBUG", "INFO", "WARN", "ERRO"}:
+            return normalized
+        if normalized in cls._LEVEL_ALIAS:
+            return cls._LEVEL_ALIAS[normalized]
+        text = (message or "").strip()
+        if text:
+            matches = cls._LOG_LEVEL_PATTERN.findall(text)
+            for candidate in matches:
+                candidate = (candidate or "").strip().upper()
+                if candidate in cls._LEVEL_ALIAS:
+                    candidate = cls._LEVEL_ALIAS[candidate]
+                if candidate in {"DEBUG", "INFO", "WARN", "ERRO"}:
+                    return candidate
+            lower_text = text.lower()
+            if any(keyword in lower_text for keyword in ("error", "exception", "traceback", "failed", "failure", "critical", "fatal")) or "失败" in text or "报错" in text:
+                return "ERRO"
+            if any(keyword in lower_text for keyword in ("warn", "warning")) or "警告" in text:
+                return "WARN"
+        return normalized or "INFO"
+
+    @staticmethod
+    def _is_error_message(message: Optional[str]) -> bool:
+        if not message:
+            return False
+        lower_text = message.lower()
+        if any(keyword in lower_text for keyword in ("error", "exception", "traceback", "failed", "failure", "critical", "fatal")):
+            return True
+        return "失败" in message or "报错" in message or "载入失败" in message
     
     def __init__(self, config: AstrBotConfig):
         self.config = config
@@ -221,39 +257,43 @@ class PluginInstaller:
                     
                     if result.get("status") == "ok":
                         logs = result.get('data', {}).get('logs', [])
-                        
+
                         # 查找插件相关的错误和警告
                         error_logs = []
                         warning_logs = []
-                        
+                        target_name = (plugin_name or "").lower()
+
                         for log_entry in logs:
                             if not isinstance(log_entry, dict):
                                 continue
-                                
+
                             data = log_entry.get('data', {})
                             if isinstance(data, str):
-                                message = data
-                                level = log_entry.get('level', '').upper()
+                                message = data or ""
+                                raw_level = log_entry.get('level', '')
                                 module = ''
                             else:
-                                level = data.get('level', log_entry.get('level', '')).upper()
-                                message = data.get('message', '')
-                                module = data.get('module', data.get('name', ''))
-                                
+                                raw_level = data.get('level', log_entry.get('level', ''))
+                                message = data.get('message', '') or ""
+                                module = data.get('module', data.get('name', '')) or ""
+                            level = self._normalize_log_level(raw_level, message)
+                            lower_module = module.lower()
+                            lower_message = message.lower()
+
                             # 检查是否与插件相关
                             is_plugin_related = (
-                                'plugin' in module.lower() or 
-                                'star' in module.lower() or
-                                plugin_name.lower() in message.lower() or
-                                plugin_name.lower() in module.lower()
+                                'plugin' in lower_module or
+                                'star' in lower_module or
+                                target_name in lower_message or
+                                target_name in lower_module
                             )
-                            
+
                             if is_plugin_related:
-                                if level in ['ERROR', 'ERRO'] or 'error' in message.lower() or '失败' in message:
+                                if level == 'ERRO' or self._is_error_message(message):
                                     error_logs.append(message)
-                                elif level == 'WARN' or 'warn' in message.lower():
+                                elif level == 'WARN' or 'warn' in lower_message or '警告' in message:
                                     warning_logs.append(message)
-                                    
+
                         return {
                             "success": True,
                             "has_errors": len(error_logs) > 0,
@@ -266,10 +306,143 @@ class PluginInstaller:
                             "success": False,
                             "error": f"获取日志失败: {result.get('message')}"
                         }
-                        
+
         except Exception as e:
             self.logger.error(f"检查插件状态失败: {str(e)}")
             return {
                 "success": False,
                 "error": str(e)
             }
+
+    async def detect_plugin_erro_logs(self, plugin_name: str) -> Dict[str, Any]:
+        """检测插件在 AstrBot 日志中的 ERRO 级别错误（严格匹配，且仅限于该插件）。
+
+        Args:
+            plugin_name: 插件名称
+
+        Returns:
+            Dict[str, Any]: {success, errors: list[str]}
+        """
+        if not self.token:
+            if not await self.login():
+                return {"success": False, "errors": ["API 登录失败"]}
+        try:
+            import aiohttp
+            import asyncio
+
+            # 给 AstrBot 一些时间完成插件加载
+            await asyncio.sleep(3)
+
+            url = f"{self.astrbot_url}/api/log-history?limit=200"
+            headers = {"Authorization": f"Bearer {self.token}"}
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, headers=headers) as resp:
+                    result = await resp.json()
+                    if result.get("status") != "ok":
+                        return {"success": False, "errors": [f"获取日志失败: {result.get('message')}"]}
+                    logs = result.get("data", {}).get("logs", [])
+                    errors: list[str] = []
+                    target_name = (plugin_name or "").lower()
+                    for log_entry in logs:
+                        if not isinstance(log_entry, dict):
+                            continue
+                        data = log_entry.get("data", {})
+                        if isinstance(data, str):
+                            message = data or ""
+                            raw_level = log_entry.get("level", "")
+                            module = ""
+                        else:
+                            raw_level = data.get("level", log_entry.get("level", ""))
+                            message = data.get("message", "") or ""
+                            module = data.get("module", data.get("name", "")) or ""
+                        level = self._normalize_log_level(raw_level, message)
+                        lower_module = module.lower()
+                        lower_message = message.lower()
+                        # 仅在 ERRO 级别并且与当前插件相关时记录
+                        is_plugin_related = (
+                            target_name in lower_message
+                            or target_name in lower_module
+                            or "plugin" in lower_module
+                            or "star" in lower_module
+                        )
+                        if is_plugin_related and (level == "ERRO" or self._is_error_message(message)):
+                            # 只收集较为关键的简要信息
+                            errors.append(message or str(data))
+                    return {"success": True, "errors": errors}
+        except Exception as e:
+            self.logger.error(f"检测 ERRO 日志失败: {str(e)}")
+            return {"success": False, "errors": [str(e)]}
+
+    async def uninstall_plugin(self, plugin_name: str) -> Dict[str, Any]:
+        """通过 AstrBot API 卸载插件。
+
+        Args:
+            plugin_name: 插件名称
+
+        Returns:
+            Dict[str, Any]: {success, message}
+        """
+        if not self.token:
+            if not await self.login():
+                return {"success": False, "message": "API 登录失败"}
+        try:
+            import aiohttp
+            url = f"{self.astrbot_url}/api/plugin/uninstall"
+            headers = {
+                "Authorization": f"Bearer {self.token}",
+                "Content-Type": "application/json",
+            }
+            payload = {"name": plugin_name}
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, headers=headers, json=payload) as resp:
+                    res = await resp.json()
+                    if res.get("status") == "ok":
+                        return {"success": True, "message": res.get("message", "卸载成功")}
+                    return {"success": False, "message": res.get("message", "卸载失败")}
+        except Exception as e:
+            return {"success": False, "message": f"请求失败: {str(e)}"}
+
+    def delete_plugin_folder(self, plugin_name: str) -> Dict[str, Any]:
+        """删除本地插件目录（文件删除）。
+
+        Args:
+            plugin_name: 插件名称
+
+        Returns:
+            Dict[str, Any]: {success, message}
+        """
+        try:
+            import shutil
+            from .directory_detector import DirectoryDetector
+            detector = DirectoryDetector()
+            path = detector.get_plugin_path(plugin_name)
+            if not path:
+                return {"success": False, "message": "未找到插件目录"}
+            if os.path.exists(path):
+                shutil.rmtree(path, ignore_errors=True)
+            if not os.path.exists(path):
+                return {"success": True, "message": f"已删除目录: {path}"}
+            return {"success": False, "message": f"目录仍存在: {path}"}
+        except Exception as e:
+            return {"success": False, "message": f"删除失败: {str(e)}"}
+
+    async def remove_plugin(self, plugin_name: str) -> Dict[str, Any]:
+        """混合卸载：优先 API 卸载，失败后尝试文件删除。
+
+        Args:
+            plugin_name: 插件名称
+        Returns:
+            Dict[str, Any]: {api_uninstall_ok, fs_delete_ok, message}
+        """
+        api_ok = False
+        fs_ok = False
+        api_ret = await self.uninstall_plugin(plugin_name)
+        api_ok = api_ret.get("success", False)
+        if not api_ok:
+            # API 卸载失败，尝试文件删除
+            fs_ret = self.delete_plugin_folder(plugin_name)
+            fs_ok = fs_ret.get("success", False)
+            message = f"API 卸载失败: {api_ret.get('message')}; 文件删除结果: {fs_ret.get('message')}"
+        else:
+            message = api_ret.get("message", "卸载成功")
+        return {"api_uninstall_ok": api_ok, "fs_delete_ok": fs_ok, "message": message}
