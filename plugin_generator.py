@@ -642,9 +642,9 @@ class PluginGenerator:
                         await event.send(event.plain_result("正在通过API安装插件..." if attempt == 1 else f"通过API安装重试第{attempt}次..."))
                         install_result = await self.installer.install_plugin(zip_path)
                         result["installed"] = True
-                        result["install_success"] = install_result.get("success", False)
+                        result["install_success"] = False
                         if not install_result.get("success"):
-                            # 安装失败：重试或回退
+
                             result["install_error"] = install_result.get("error", "未知错误")
                             self.logger.error(f"API 安装失败: {result['install_error']}")
                             if not unlimited and attempt >= max_retries:
@@ -683,6 +683,8 @@ class PluginGenerator:
                             continue
                         else:
                             api_success_without_errors = True
+                            result["install_success"] = True
+                            result.pop("install_error", None)
                             await event.send(event.plain_result("✅ 插件已通过API安装且未检测到 ERRO 错误"))
                             break
                     except Exception as e:
@@ -1004,7 +1006,7 @@ class PluginGenerator:
                         await event.send(event.plain_result("正在通过API安装插件..." if attempt == 1 else f"通过API安装重试第{attempt}次..."))
                         install_result = await self.installer.install_plugin(zip_path)
                         result["installed"] = True
-                        result["install_success"] = install_result.get("success", False)
+                        result["install_success"] = False
                         if not install_result.get("success"):
                             # 安装失败：重试或回退
                             result["install_error"] = install_result.get("error", "未知错误")
@@ -1045,6 +1047,8 @@ class PluginGenerator:
                             continue
                         else:
                             api_success_without_errors = True
+                            result["install_success"] = True
+                            result.pop("install_error", None)
                             await event.send(event.plain_result("✅ 插件已通过API安装且未检测到 ERRO 错误"))
                             break
                     except Exception as e:
