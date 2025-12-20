@@ -86,6 +86,7 @@ git clone https://github.com/qa296/astrbot_plugin_codemage.git
    ```
    /生成插件 创建一个天气查询插件，可以通过城市名称查询天气信息
    ```
+> 生成插件的描述可以使用空格分隔的多句话。
 
 2. **查看插件生成状态**
    ```
