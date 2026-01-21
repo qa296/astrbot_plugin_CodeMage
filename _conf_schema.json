@@ -2,7 +2,8 @@
   "llm_provider_id": {
     "description": "LLM提供商ID",
     "type": "string",
-    "hint": "用于生成插件的LLM提供商ID，需要在AstrBot中配置"
+    "hint": "选择用于生成插件的LLM提供商",
+    "_special": "select_provider"
   },
   "admin_only": {
     "description": "仅管理员可用",
