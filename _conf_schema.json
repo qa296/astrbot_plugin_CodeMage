@@ -47,6 +47,18 @@
     "hint": "插件生成失败时的最大重试次数，-1为无限",
     "default": 3
   },
+  "enable_static_review": {
+    "description": "启用静态代码审查",
+    "type": "bool",
+    "hint": "是否启用基于 ruff + pylint + mypy 的静态代码审查（含 AstrBot 专项规则）",
+    "default": true
+  },
+  "enable_llm_review": {
+    "description": "启用LLM审查",
+    "type": "bool",
+    "hint": "是否启用基于 LLM 的审查与自动修复（关闭后仅执行静态审查，不进行自动修复）",
+    "default": true
+  },
   "enable_function_call": {
     "description": "启用函数调用",
     "type": "bool",
