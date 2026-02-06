@@ -1,7 +1,7 @@
 name: astrbot_plugin_codemage
 display_name: 插件生成器
 author: qa296
-description: 还在手写 AstrBot 插件？描述你想要的功能，看着 AI 在几秒内把它变成可运行的代码——不需要编程经验，不需要翻阅文档，只需要一句话。CodeMage 正在改变机器人扩展的开发方式，而你绝对想不到它还能做到什么。
+description: 还在手写 AstrBot 插件？描述你想要的功能，看着 AI 在内把它变成可运行的代码——不需要编程经验，不需要翻阅文档，只需要一句话。CodeMage 正在改变机器人扩展的开发方式，而你绝对想不到它还能做到什么。
 version: 1.1.1
 repo: https://github.com/qa296/astrbot_plugin_codemage
 dependencies:
