@@ -303,8 +303,7 @@ class CodeMagePlugin(Star):
             
         # 取消插件生成流程
         try:
-            result = await self.plugin_generator.continue_plugin_generation(False, event=event)
-            yield event.plain_result("已完全停止插件生成")
+            await self.plugin_generator.continue_plugin_generation(False, event=event)
         except Exception as e:
             self.logger.error(f"拒绝插件生成过程中发生错误: {str(e)}")
             yield event.plain_result(f"停止插件生成失败：{str(e)}")
