@@ -47,6 +47,12 @@
     "hint": "插件生成失败时的最大重试次数，-1为无限",
     "default": 3
   },
+  "static_code_audit": {
+    "description": "启用针对AstrBot插件的静态代码审查（ruff + pylint + mypy）",
+    "type": "bool",
+    "hint": "开启后将对 LLM 生成的 main.py 执行 ruff/pylint/mypy 的静态检查并结合自定义规则进行报告（不阻断流程）",
+    "default": true
+  },
   "enable_function_call": {
     "description": "启用函数调用",
     "type": "bool",

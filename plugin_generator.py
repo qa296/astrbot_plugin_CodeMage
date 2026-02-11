@@ -562,8 +562,29 @@ class PluginGenerator:
             # 步骤4：生成插件代码
             self._update_status(4, plugin_name)
             self.logger.info(f"开始生成插件代码: {plugin_name}")
+            # 预置静态审查收集容器
+            static_flat_issues: List[str] = []
+            static_error_count: int = 0
             try:
                 code = await self.llm_handler.generate_plugin_code(metadata, markdown_doc, config_schema)
+                # 在生成后执行静态审查（ruff/pylint/mypy）
+                if self.config.get("static_code_audit", True):
+                    try:
+                        from .static_auditor import StaticCodeAuditor
+                        auditor = StaticCodeAuditor(self.config)
+                        audit_res = await auditor.audit_code(code, plugin_name)
+                        counts = audit_res.counts()
+                        static_error_count = counts.get("errors", 0)
+                        static_flat_issues = audit_res.flat_messages(limit=50)
+                        summary = f"静态审查完成：错误 {counts.get('errors',0)}，警告 {counts.get('warnings',0)}，提示 {counts.get('infos',0)}"
+                        await event.send(event.plain_result(summary))
+                        # 如有必要，展示部分问题样例
+                        if static_flat_issues:
+                            sample = "\n".join(static_flat_issues[:5])
+                            await event.send(event.plain_result(f"静态审查样例（最多5条）：\n{sample}"))
+                    except Exception as _e:
+                        # 审查失败不阻断生成流程，仅记录
+                        self.logger.warning(f"静态代码审查执行失败: {str(_e)}")
             except Exception as code_err:
                 error_msg = f"生成插件代码失败：{str(code_err)}"
                 self.logger.error(error_msg)
@@ -576,6 +597,25 @@ class PluginGenerator:
             self._update_status(5, plugin_name)
             self.logger.info(f"开始代码审查: {plugin_name}")
             review_result = normalize_review_result(await self._review_code_with_retry(code, metadata, markdown_doc))
+            # 合并静态审查的发现，提升针对性修复
+            if static_flat_issues:
+                try:
+                    # 将静态问题融入 LLM 审查问题集中
+                    merged_issues = list(dict.fromkeys(list(review_result.get("issues", [])) + static_flat_issues))
+                    review_result["issues"] = merged_issues
+                    # 增补统一建议
+                    merged_suggestions = list(dict.fromkeys(list(review_result.get("suggestions", [])) + ["修复静态检查（ruff/pylint/mypy）发现的问题"]))
+                    review_result["suggestions"] = merged_suggestions
+                    # 如存在静态错误，则不予通过并适当下调满意度
+                    if static_error_count > 0:
+                        review_result["approved"] = False
+                        try:
+                            score = int(review_result.get("satisfaction_score", 0))
+                        except Exception:
+                            score = 0
+                        review_result["satisfaction_score"] = max(0, score - 10)
+                except Exception as _e:
+                    self.logger.warning(f"合并静态审查结果时发生异常: {str(_e)}")
             satisfaction_threshold = self.config.get("satisfaction_threshold", 80)
             strict_review = self.config.get("strict_review", True)
             max_retries = self.config.get("max_retries", 3)
@@ -803,8 +843,28 @@ class PluginGenerator:
             
             # 步骤4：生成插件代码
             self.logger.info(f"开始生成插件代码: {plugin_name}")
+            # 预置静态审查收集容器
+            static_flat_issues: List[str] = []
+            static_error_count: int = 0
             try:
                 code = await self.llm_handler.generate_plugin_code(metadata, markdown_doc, config_schema)
+                # 在生成后执行静态审查（ruff/pylint/mypy）
+                if self.config.get("static_code_audit", True):
+                    try:
+                        from .static_auditor import StaticCodeAuditor
+                        auditor = StaticCodeAuditor(self.config)
+                        audit_res = await auditor.audit_code(code, plugin_name)
+                        counts = audit_res.counts()
+                        static_error_count = counts.get("errors", 0)
+                        static_flat_issues = audit_res.flat_messages(limit=50)
+                        summary = f"静态审查完成：错误 {counts.get('errors',0)}，警告 {counts.get('warnings',0)}，提示 {counts.get('infos',0)}"
+                        await event.send(event.plain_result(summary))
+                        # 如有必要，展示部分问题样例
+                        if static_flat_issues:
+                            sample = "\n".join(static_flat_issues[:5])
+                            await event.send(event.plain_result(f"静态审查样例（最多5条）：\n{sample}"))
+                    except Exception as _e:
+                        self.logger.warning(f"静态代码审查执行失败: {str(_e)}")
             except Exception as code_err:
                 error_msg = f"生成插件代码失败：{str(code_err)}"
                 self.logger.error(error_msg)
@@ -853,6 +913,22 @@ class PluginGenerator:
                 return result
                 
             review_result = normalize_review_result(await self._review_code_with_retry(code, metadata, markdown_doc))
+            # 合并静态审查的发现，提升针对性修复
+            if static_flat_issues:
+                try:
+                    merged_issues = list(dict.fromkeys(list(review_result.get("issues", [])) + static_flat_issues))
+                    review_result["issues"] = merged_issues
+                    merged_suggestions = list(dict.fromkeys(list(review_result.get("suggestions", [])) + ["修复静态检查（ruff/pylint/mypy）发现的问题"]))
+                    review_result["suggestions"] = merged_suggestions
+                    if static_error_count > 0:
+                        review_result["approved"] = False
+                        try:
+                            score = int(review_result.get("satisfaction_score", 0))
+                        except Exception:
+                            score = 0
+                        review_result["satisfaction_score"] = max(0, score - 10)
+                except Exception as _e:
+                    self.logger.warning(f"合并静态审查结果时发生异常: {str(_e)}")
             satisfaction_threshold = self.config.get("satisfaction_threshold", 80)
             strict_review = self.config.get("strict_review", True)
             max_retries = self.config.get("max_retries", 3)
