@@ -8,13 +8,7 @@ from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.star import Context
-<<<<<<< HEAD
-from astrbot.api import AstrBotConfig
 from .utils import extract_code_blocks, parse_json_response, extract_codemage_block
-=======
-
-from .utils import extract_code_blocks, parse_json_response
->>>>>>> 4960ec9d5f7e5fdbac127c8074279830a94172e5
 
 
 class LLMHandler:
@@ -237,17 +231,10 @@ class LLMHandler:
 
         prompt = f"根据以下插件信息生成Markdown文档：\n\n元数据：\n{metadata_str}\n\n用户描述：\n{description}"
         response = await self.call_llm(prompt, system_prompt)
-<<<<<<< HEAD
         markdown_content = extract_codemage_block(response, "markdown")
         if markdown_content:
             return markdown_content
-        
-=======
-        markdown_blocks = extract_code_blocks(response)
-        if markdown_blocks:
-            return markdown_blocks[0]
 
->>>>>>> 4960ec9d5f7e5fdbac127c8074279830a94172e5
         raise ValueError("无法从LLM响应中提取插件Markdown文档")
 
     async def optimize_plugin_metadata(
@@ -344,17 +331,10 @@ class LLMHandler:
         response = await self.call_llm(prompt, system_prompt)
 
         # 提取代码块
-<<<<<<< HEAD
         code_content = extract_codemage_block(response, "python")
         if code_content:
             return code_content
-            
-=======
-        code_blocks = extract_code_blocks(response)
-        if code_blocks:
-            return code_blocks[0]
 
->>>>>>> 4960ec9d5f7e5fdbac127c8074279830a94172e5
         raise ValueError("无法从LLM响应中提取插件代码")
 
     async def review_plugin_code(
@@ -576,7 +556,6 @@ class LLMHandler:
                 response = await self.call_llm(prompt, system_prompt)
 
                 # 提取代码块
-<<<<<<< HEAD
                 code_content = extract_codemage_block(response, "python")
                 if code_content:
                     return code_content
@@ -585,16 +564,6 @@ class LLMHandler:
                 if attempt < max_retries - 1:
                     prompt += "\n\n重要：请确保返回的代码包含在<codemage:python>和</codemage:python>之间，不要包含其他内容。"
                     
-=======
-                code_blocks = extract_code_blocks(response)
-                if code_blocks:
-                    return code_blocks[0]
-
-                # 如果不是最后一次尝试，修改提示词要求更明确的格式
-                if attempt < max_retries - 1:
-                    prompt += "\n\n重要：请确保返回的代码包含在```python和```之间，不要包含其他内容。"
-
->>>>>>> 4960ec9d5f7e5fdbac127c8074279830a94172e5
             except Exception as e:
                 logger.error(
                     f"修复插件代码失败（尝试 {attempt + 1}/{max_retries}）：{str(e)}"
@@ -721,17 +690,10 @@ class LLMHandler:
         response = await self.call_llm(prompt, system_prompt)
 
         # 解析JSON响应
-<<<<<<< HEAD
         json_content = extract_codemage_block(response, "json")
         if json_content:
             return json_content
-        
-=======
-        json_blocks = extract_code_blocks(response)
-        if json_blocks:
-            return json_blocks[0]
 
->>>>>>> 4960ec9d5f7e5fdbac127c8074279830a94172e5
         raise ValueError("无法修改插件配置文件")
 
     async def modify_markdown_document(
@@ -774,17 +736,10 @@ class LLMHandler:
         response = await self.call_llm(prompt, system_prompt)
 
         # 提取Markdown内容
-<<<<<<< HEAD
         markdown_content = extract_codemage_block(response, "markdown")
         if markdown_content:
             return markdown_content
-        
-=======
-        markdown_blocks = extract_code_blocks(response)
-        if markdown_blocks:
-            return markdown_blocks[0]
 
->>>>>>> 4960ec9d5f7e5fdbac127c8074279830a94172e5
         raise ValueError("无法修改插件Markdown文档")
 
     async def modify_plugin_metadata(
