@@ -1,229 +1,302 @@
-# 插件开发文档
+# AstrBot Developer Documentation (Merged)
 
-## 插件开发基础
+> All development documentation merged and ordered by importance for plugin developers.
+
+## Table of Contents
+
+1. [Minimal Plugin Example](#minimal-example)
+2. [Plugin Development Guide](#astrbot-plugin-development-guide-)
+3. [Handling Message Events](#handling-message-events)
+4. [Sending Messages](#sending-messages)
+5. [AI / LLM Integration](#ai)
+6. [Plugin Configuration](#plugin-configuration)
+7. [Session Control](#session-control)
+8. [Plugin Storage](#plugin-storage)
+9. [Text to Image](#text-to-image)
+10. [Publishing Plugins](#publishing-plugins-to-the-plugin-marketplace)
+11. [AstrBot Configuration File](#astrbot-configuration-file)
+12. [HTTP API](#astrbot-http-api)
+13. [Developing a Platform Adapter](#开发一个平台适配器)
 
 ---
-outline: deep
----
 
-## 提要
+# Minimal Example
 
-### 最小实例
-
-插件模版中的 `main.py` 是一个最小的插件实例。
+The `main.py` file in the plugin template is a minimal plugin instance.
 
 ```python
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
-from astrbot.api.star import Context, Star, register
-from astrbot.api import logger # 使用 astrbot 提供的 logger 接口
+from astrbot.api.star import Context, Star
+from astrbot.api import logger # Use the logger interface provided by AstrBot
 
-@register("helloworld", "author", "一个简单的 Hello World 插件", "1.0.0", "repo url")
 class MyPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
 
-    # 注册指令的装饰器。指令名为 helloworld。注册成功后，发送 `/helloworld` 就会触发这个指令，并回复 `你好, {user_name}!`
+    # Decorator to register a command. The command name is "helloworld". Once registered, sending `/helloworld` will trigger this command and respond with `Hello, {user_name}!`
     @filter.command("helloworld")
     async def helloworld(self, event: AstrMessageEvent):
-        '''这是一个 hello world 指令''' # 这是 handler 的描述，将会被解析方便用户了解插件内容。非常建议填写。
+        '''This is a hello world command''' # This is the handler's description, which will be parsed to help users understand the plugin's functionality. Highly recommended to provide.
         user_name = event.get_sender_name()
-        message_str = event.message_str # 获取消息的纯文本内容
-        logger.info("触发hello world指令!")
-        yield event.plain_result(f"Hello, {user_name}!") # 发送一条纯文本消息
+        message_str = event.message_str # Get the plain text content of the message
+        logger.info("Hello world command triggered!")
+        yield event.plain_result(f"Hello, {user_name}!") # Send a plain text message
 
     async def terminate(self):
-        '''可选择实现 terminate 函数，当插件被卸载/停用时会调用。'''
+        '''Optionally implement the terminate function, which will be called when the plugin is uninstalled/disabled.'''
 ```
 
-解释如下：
+Explanation:
 
-1. 插件是继承自 `Star` 基类的类实现。
-2. 开发者必须使用 `@register` 装饰器来注册插件，这是 AstrBot 识别和加载插件的必要条件。
-3. 该装饰器提供了插件的元数据信息，包括名称、作者、描述、版本和仓库地址等信息。（该信息的优先级低于 `metadata.yaml` 文件）
-4. 在 `__init__` 方法中会传入 `Context` 对象，这个对象包含了 AstrBot 的大多数组件
-5. 具体的处理函数 `Handler` 在插件类中定义，如这里的 `helloworld` 函数。
-6. 请务必使用 `from astrbot.api import logger` 来获取日志对象，而不是使用 `logging` 模块。
+- Plugins must inherit from the `Star` class.
+- The `Context` class is used for plugin interaction with AstrBot Core, allowing you to call various APIs provided by AstrBot Core.
+- Specific handler functions are defined within the plugin class, such as the `helloworld` function here.
+- `AstrMessageEvent` is AstrBot's message event object, which stores information about the message sender, message content, etc.
+- `AstrBotMessage` is AstrBot's message object, which stores the specific content of messages delivered by the messaging platform. It can be accessed via `event.message_obj`.
 
 > [!TIP]
 >
-> `Handler` 一定需要在插件类中注册，前两个参数必须为 `self` 和 `event`。如果文件行数过长，可以将服务写在外部，然后在 `Handler` 中调用。
+> Handlers must be registered within the plugin class, with the first two parameters being `self` and `event`. If the file becomes too long, you can write services externally and call them from the handler.
 >
-> 插件类所在的文件名需要命名为 `main.py`。
+> The file containing the plugin class must be named `main.py`.
 
-### API 文件结构
+All handler functions must be written within the plugin class. To keep content concise, in subsequent sections, we may omit the plugin class definition.
 
-所有的 API 都在 `astrbot/api` 目录下。
+---
 
+# AstrBot Plugin Development Guide 🌠
+
+Welcome to the AstrBot Plugin Development Guide! This section will guide you through developing AstrBot plugins. Before we begin, we hope you have the following foundational knowledge:
+
+1. Some experience with Python programming.
+2. Some experience with Git and GitHub.
+
+## Environment Setup
+
+### Obtain the Plugin Template
+
+1. Open the AstrBot plugin template: [helloworld](https://github.com/Soulter/helloworld)
+2. Click `Use this template` in the upper right corner
+3. Then click `Create new repository`.
+4. Fill in your plugin name in the `Repository name` field. Plugin naming conventions:
+   - Recommended to start with `astrbot_plugin_`;
+   - Must not contain spaces;
+   - Keep all letters lowercase;
+   - Keep it concise.
+5. Click `Create repository` in the lower right corner.
+
+### Clone the Project Locally
+
+Clone both the AstrBot main project and the plugin repository you just created to your local machine.
+
+```bash
+git clone https://github.com/AstrBotDevs/AstrBot
+mkdir -p AstrBot/data/plugins
+cd AstrBot/data/plugins
+git clone <your-plugin-repository-url>
 ```
-api
-├── __init__.py
-├── all.py # 无脑使用所有的结构
-├── event
-│   └── filter # 过滤器，事件钩子
-├── message_components.py # 消息段组建类型
-├── platform # 平台相关的结构
-├── provider # 大语言模型提供商相关的结构
-└── star
+
+Then, use `VSCode` to open the `AstrBot` project. Navigate to the `data/plugins/<your-plugin-name>` directory.
+
+Update the `metadata.yaml` file with your plugin's metadata information.
+
+> [!WARNING]
+> Please make sure to modify this file, as AstrBot relies on the `metadata.yaml` file to recognize plugin metadata.
+
+### Set Plugin Logo (Optional)
+
+You can add a `logo.png` file in the plugin directory as the plugin's logo. Please maintain an aspect ratio of 1:1, with a recommended size of 256x256.
+
+![Plugin logo example](https://files.astrbot.app/docs/source/images/plugin/plugin_logo.png)
+
+### Plugin Display Name (Optional)
+
+You can modify (or add) the `display_name` field in the `metadata.yaml` file to serve as the plugin's display name in scenarios like the plugin marketplace, making it easier for users to read.
+
+### Declare Supported Platforms (Optional)
+
+You can add a `support_platforms` field (`list[str]`) to `metadata.yaml` to declare which platform adapters your plugin supports. The WebUI plugin page will display this field.
+
+```yaml
+support_platforms:
+  - telegram
+  - discord
 ```
 
-### AstrMessageEvent
+The values in `support_platforms` must be keys from `ADAPTER_NAME_2_TYPE`. Currently supported:
 
-`AstrMessageEvent` 是 AstrBot 的消息事件对象。你可以通过 `AstrMessageEvent` 来获取消息发送者、消息内容等信息。
+- `aiocqhttp`
+- `qq_official`
+- `telegram`
+- `wecom`
+- `lark`
+- `dingtalk`
+- `discord`
+- `slack`
+- `kook`
+- `vocechat`
+- `weixin_official_account`
+- `satori`
+- `misskey`
+- `line`
 
-### AstrBotMessage
+### Declare AstrBot Version Range (Optional)
 
-`AstrBotMessage` 是 AstrBot 的消息对象。你可以通过 `AstrBotMessage` 来查看消息适配器下发的消息的具体内容。通过 `event.message_obj` 获取。
+You can add an `astrbot_version` field in `metadata.yaml` to declare the required AstrBot version range for your plugin. The format follows dependency specifiers in `pyproject.toml` (PEP 440), and must not include a `v` prefix.
+
+```yaml
+astrbot_version: ">=4.16,<5"
+```
+
+Examples:
+
+- `>=4.17.0`
+- `>=4.16,<5`
+- `~=4.17`
+
+If you only want to declare a minimum version, use:
+
+- `>=4.17.0`
+
+If the current AstrBot version does not satisfy this range, the plugin will be blocked from loading with a compatibility error.
+In the WebUI installation flow, you can choose to "Ignore Warning and Install" to bypass this check.
+
+### Debugging Plugins
+
+AstrBot uses a runtime plugin injection mechanism. Therefore, when debugging plugins, you need to start the AstrBot main application.
+
+You can use AstrBot's hot reload feature to streamline the development process.
+
+After modifying the plugin code, you can find your plugin in the AstrBot WebUI's plugin management section, click the `...` button in the upper right corner, and select `Reload Plugin`.
+
+If the plugin fails to load due to code errors or other reasons, you can also click **"Try one-click reload fix"** in the error prompt on the admin panel to reload it.
+
+### Plugin Dependency Management
+
+Currently, AstrBot manages plugin dependencies using pip's built-in `requirements.txt` file. If your plugin requires third-party libraries, please be sure to create a `requirements.txt` file in the plugin directory and list the dependencies used, to prevent Module Not Found errors when users install your plugin.
+
+> For the complete format of `requirements.txt`, please refer to the [pip official documentation](https://pip.pypa.io/en/stable/reference/requirements-file-format/).
+
+## Development Principles
+
+Thank you for contributing to the AstrBot ecosystem. Please follow these principles when developing plugins, which are also good programming practices:
+
+- Features must be tested.
+- Include comprehensive comments.
+- Store persistent data in the `data` directory, not in the plugin's own directory, to prevent data loss when updating/reinstalling the plugin.
+- Implement robust error handling mechanisms; don't let a single error crash the plugin.
+- Before committing, please use the [ruff](https://docs.astral.sh/ruff/) tool to format your code.
+- Do not use the `requests` library for network requests; use asynchronous network request libraries such as `aiohttp` or `httpx`.
+- If you're extending functionality for an existing plugin, please prioritize submitting a PR to that plugin rather than creating a separate one (unless the original plugin author has stopped maintaining it).
+
+---
+
+# Handling Message Events
+
+Event listeners can receive message content delivered by the platform and implement features such as commands, command groups, and event listening.
+
+Event listener decorators are located in `astrbot.api.event.filter` and must be imported first. Please make sure to import it, otherwise it will conflict with Python's built-in `filter` higher-order function.
+
+```py
+from astrbot.api.event import filter, AstrMessageEvent
+```
+
+## Messages and Events
+
+AstrBot receives messages delivered by messaging platforms and encapsulates them as `AstrMessageEvent` objects, which are then passed to plugins for processing.
+
+![message-event](https://files.astrbot.app/docs/en/dev/star/guides/message-event.svg)
+
+### Message Events
+
+`AstrMessageEvent` is AstrBot's message event object, which stores information about the message sender, message content, etc.
+
+### Message Object
+
+`AstrBotMessage` is AstrBot's message object, which stores the specific content of messages delivered by the messaging platform. The `AstrMessageEvent` object contains a `message_obj` attribute to retrieve this message object.
 
 ```py{11}
 class AstrBotMessage:
-    '''AstrBot 的消息对象'''
-    type: MessageType  # 消息类型
-    self_id: str  # 机器人的识别id
-    session_id: str  # 会话id。取决于 unique_session 的设置。
-    message_id: str  # 消息id
-    group_id: str = "" # 群组id，如果为私聊，则为空
-    sender: MessageMember  # 发送者
-    message: List[BaseMessageComponent]  # 消息链。比如 [Plain("Hello"), At(qq=123456)]
-    message_str: str  # 最直观的纯文本消息字符串，将消息链中的 Plain 消息（文本消息）连接起来
+    '''AstrBot's message object'''
+    type: MessageType  # Message type
+    self_id: str  # Bot's identification ID
+    session_id: str  # Session ID. Depends on the unique_session setting.
+    message_id: str  # Message ID
+    group_id: str = "" # Group ID, empty if it's a private chat
+    sender: MessageMember  # Sender
+    message: List[BaseMessageComponent]  # Message chain. For example: [Plain("Hello"), At(qq=123456)]
+    message_str: str  # The most straightforward plain text message string, concatenating Plain messages (text messages) from the message chain
     raw_message: object
-    timestamp: int  # 消息时间戳
+    timestamp: int  # Message timestamp
 ```
 
-其中，`raw_message` 是消息平台适配器的**原始消息对象**。
+Here, `raw_message` is the **raw message object** from the messaging platform adapter.
 
-### 消息链
+### Message Chain
 
-`消息链`描述一个消息的结构，是一个有序列表，列表中每一个元素称为`消息段`。
+![message-chain](https://files.astrbot.app/docs/en/dev/star/guides/message-chain.svg)
 
-引用方式：
+A `message chain` describes the structure of a message. It's an ordered list where each element is called a `message segment`.
 
-```py
-import astrbot.api.message_components as Comp
-```
+Common message segment types include:
 
-```
-[Comp.Plain(text="Hello"), Comp.At(qq=123456), Comp.Image(file="https://example.com/image.jpg")]
-```
+- `Plain`: Text message segment
+- `At`: Mention message segment
+- `Image`: Image message segment
+- `Record`: Audio message segment
+- `Video`: Video message segment
+- `File`: File message segment
 
-> qq 是对应消息平台上的用户 ID。
+Most messaging platforms support the above message segment types.
 
-消息链的结构使用了 `nakuru-project`。它一共有如下种消息类型。常用的已经用注释标注。
+Additionally, the OneBot v11 platform (QQ personal accounts, etc.) also supports the following common message segment types:
 
-```py
-ComponentTypes = {
-    "plain": Plain, # 文本消息
-    "text": Plain, # 文本消息，同上
-    "face": Face, # QQ 表情
-    "record": Record, # 语音
-    "video": Video, # 视频
-    "at": At, # At 消息发送者
-    "music": Music, # 音乐
-    "image": Image, # 图片
-    "reply": Reply, # 回复消息
-    "forward": Forward, # 转发消息
-    "node": Node, # 转发消息中的节点
-    "nodes": Nodes, # Node 的列表，用于支持一个转发消息中的多个节点
-    "poke": Poke, # 戳一戳
-}
-```
+- `Face`: Emoji message segment
+- `Node`: A node in a forward message
+- `Nodes`: Multiple nodes in a forward message
+- `Poke`: Poke message segment
 
-请善于 debug 来了解消息结构：
+In AstrBot, message chains are represented as lists of type `List[BaseMessageComponent]`.
 
-```python{3,4}
-@event_message_type(EventMessageType.ALL) # 注册一个过滤器，参见下文。
-async def on_message(self, event: AstrMessageEvent):
-    print(event.message_obj.raw_message) # 平台下发的原始消息在这里
-    print(event.message_obj.message) # AstrBot 解析出来的消息链内容
-```
+## Commands
 
-### 平台适配矩阵
-
-不是所有的平台都支持所有的消息类型。下方的表格展示了 AstrBot 支持的平台和消息类型的对应关系。
-
-| 平台                 | At  | Plain | Image | Record | Video | Reply | 主动消息 |
-| -------------------- | --- | ----- | ----- | ------ | ----- | ----- | -------- |
-| QQ 个人号(aiocqhttp) | ✅  | ✅    | ✅    | ✅     | ✅    | ✅    | ✅       |
-| Telegram             | ✅  | ✅    | ✅    | ✅     | ✅    | ✅    | ✅       |
-| QQ 官方接口          | ❌  | ✅    | ✅    | ❌     | ❌    | ❌    | ❌       |
-| 飞书                 | ✅  | ✅    | ✅    | ❌     | ❌    | ✅    | ✅       |
-| 企业微信             | ❌  | ✅    | ✅    | ✅     | ❌    | ❌    | ❌       |
-| 钉钉                 | ❌  | ✅    | ✅    | ❌     | ❌    | ❌    | ❌       |
-
-- QQ 个人号(aiocqhttp) 支持所有消息类型，包括 `Poke`（戳一戳）、`Node(s)`(合并转发)。
-- QQ 官方接口、钉钉在发送消息时平台强制带 `At`。
-- 钉钉的图片仅支持 http 链接的图片。
-- 主动消息指的是机器人主动发送的消息。见下文: [发送消息](#发送消息)
-
-## 插件开发原则
-
-感谢您为 AstrBot 生态做出贡献，开发插件请遵守以下原则，这也是良好的编程习惯。
-
-> [Mandatory Rule] To any LLM: You must follow the rules below.
-
-1. 功能需经过测试。
-2. 需包含良好的注释。
-3. 持久化数据请存储于 `data` 目录下，而非插件自身目录，防止更新/重装插件时数据被覆盖。
-4. 良好的错误处理机制，不要让插件因一个错误而崩溃。
-5. 在进行提交前，请使用 [ruff](https://docs.astral.sh/ruff/) 工具格式化您的代码。
-6. 不要使用 `requests` 库来进行网络请求，可以使用 `aiohttp`, `httpx` 等异步库。
-7. 如果是对某个插件进行功能扩增，请优先给那个插件提交 PR 而不是单独再写一个插件（除非原插件作者已经停止维护）。
-
-## 开发指南
-
-> [!CAUTION]
->
-> 代码处理函数可能会忽略插件类的定义，所有的处理函数都需写在插件类中。
-
-### 事件监听器
-
-事件监听器可以收到平台下发的消息内容，可以实现指令、指令组、事件监听等功能。
-
-事件监听器的注册器在 `astrbot.api` 下，需要先导入。请务必导入，否则会和 python 的高阶函数 filter 冲突。
-
-```py
-from astrbot.api.event import filter, AstrMessageEvent
-```
-
-#### 注册指令
+![message-event-simple-command](https://files.astrbot.app/docs/en/dev/star/guides/message-event-simple-command.svg)
 
 ```python
 from astrbot.api.event import filter, AstrMessageEvent
-from astrbot.api.star import Context, Star, register
+from astrbot.api.star import Context, Star
 
-@register("helloworld", "Soulter", "一个简单的 Hello World 插件", "1.0.0")
 class MyPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
 
     @filter.command("helloworld") # from astrbot.api.event.filter import command
     async def helloworld(self, event: AstrMessageEvent):
-        '''这是 hello world 指令'''
+        '''This is a hello world command'''
         user_name = event.get_sender_name()
-        message_str = event.message_str # 获取消息的纯文本内容
+        message_str = event.message_str # Get the plain text content of the message
         yield event.plain_result(f"Hello, {user_name}!")
 ```
 
 > [!TIP]
-> 指令不能带空格，否则 AstrBot 会将其解析到第二个参数。可以使用下面的指令组功能，或者也使用监听器自己解析消息内容。
+> Commands cannot contain spaces, otherwise AstrBot will parse them as a second parameter. You can use the command group feature below, or use a listener to parse the message content yourself.
 
-#### 注册带参数的指令
+## Commands with Parameters
 
-AstrBot 会自动帮你解析指令的参数。
+![command-with-param](https://files.astrbot.app/docs/en/dev/star/guides/command-with-param.svg)
+
+AstrBot will automatically parse command parameters for you.
 
 ```python
-@filter.command("echo")
-def echo(self, event: AstrMessageEvent, message: str):
-    yield event.plain_result(f"你发了: {message}")
-
 @filter.command("add")
 def add(self, event: AstrMessageEvent, a: int, b: int):
-    # /add 1 2 -> 结果是: 3
-    yield event.plain_result(f"结果是: {a + b}")
+    # /add 1 2 -> Result is: 3
+    yield event.plain_result(f"Wow! The answer is {a + b}!")
 ```
 
-#### 注册指令组
+## Command Groups
 
-指令组可以帮助你组织指令。
+Command groups help you organize commands.
 
 ```python
 @filter.command_group("math")
@@ -232,26 +305,26 @@ def math(self):
 
 @math.command("add")
 async def add(self, event: AstrMessageEvent, a: int, b: int):
-    # /math add 1 2 -> 结果是: 3
-    yield event.plain_result(f"结果是: {a + b}")
+    # /math add 1 2 -> Result is: 3
+    yield event.plain_result(f"Result is: {a + b}")
 
 @math.command("sub")
 async def sub(self, event: AstrMessageEvent, a: int, b: int):
-    # /math sub 1 2 -> 结果是: -1
-    yield event.plain_result(f"结果是: {a - b}")
+    # /math sub 1 2 -> Result is: -1
+    yield event.plain_result(f"Result is: {a - b}")
 ```
 
-指令组函数内不需要实现任何函数，请直接 `pass` 或者添加函数内注释。指令组的子指令使用 `指令组名.command` 来注册。
+The command group function doesn't need to implement any logic; just use `pass` directly or add comments within the function. Subcommands of the command group are registered using `command_group_name.command`.
 
-当用户没有输入子指令时，会报错并，并渲染出该指令组的树形结构。
+When a user doesn't input a subcommand, an error will be reported and the tree structure of the command group will be rendered.
 
-![](../../source/images/plugin/image-1.png)
+![image](https://files.astrbot.app/docs/source/images/plugin/image-1.png)
 
-![](../../source/images/plugin/898a169ae7ed0478f41c0a7d14cb4d64.png)
+![image](https://files.astrbot.app/docs/source/images/plugin/898a169ae7ed0478f41c0a7d14cb4d64.png)
 
-![](../../source/images/plugin/image-2.png)
+![image](https://files.astrbot.app/docs/source/images/plugin/image-2.png)
 
-理论上，指令组可以无限嵌套！
+Theoretically, command groups can be nested infinitely!
 
 ```py
 '''
@@ -259,76 +332,78 @@ math
 ├── calc
 │   ├── add (a(int),b(int),)
 │   ├── sub (a(int),b(int),)
-│   ├── help (无参数指令)
+│   ├── help (command with no parameters)
 '''
 
 @filter.command_group("math")
 def math():
     pass
 
-@math.group("calc") # 请注意，这里是 group，而不是 command_group
+@math.group("calc") # Note: this is group, not command_group
 def calc():
     pass
 
 @calc.command("add")
 async def add(self, event: AstrMessageEvent, a: int, b: int):
-    yield event.plain_result(f"结果是: {a + b}")
+    yield event.plain_result(f"Result is: {a + b}")
 
 @calc.command("sub")
 async def sub(self, event: AstrMessageEvent, a: int, b: int):
-    yield event.plain_result(f"结果是: {a - b}")
+    yield event.plain_result(f"Result is: {a - b}")
 
 @calc.command("help")
 def calc_help(self, event: AstrMessageEvent):
     # /math calc help
-    yield event.plain_result("这是一个计算器插件，拥有 add, sub 指令。")
+    yield event.plain_result("This is a calculator plugin with add and sub commands.")
 ```
 
-#### 指令和指令组别名(alias)
+## Command Aliases
 
-> v3.4.28 后
+> Available after v3.4.28
 
-可以为指令或指令组添加不同的别名：
+You can add different aliases for commands or command groups:
 
 ```python
 @filter.command("help", alias={'帮助', 'helpme'})
 def help(self, event: AstrMessageEvent):
-    yield event.plain_result("这是一个计算器插件，拥有 add, sub 指令。")
+    yield event.plain_result("This is a calculator plugin with add and sub commands.")
 ```
 
-#### 群/私聊事件监听器
+### Event Type Filtering
 
-```python
-@filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
-async def on_private_message(self, event: AstrMessageEvent):
-    message_str = event.message_str # 获取消息的纯文本内容
-    yield event.plain_result("收到了一条私聊消息。")
-```
+#### Receive All
 
-`EventMessageType` 是一个 `Enum` 类型，包含了所有的事件类型。当前的事件类型有 `PRIVATE_MESSAGE` 和 `GROUP_MESSAGE`。
-
-#### 接收所有消息事件
-
-这将接收所有的事件。
+This will receive all events.
 
 ```python
 @filter.event_message_type(filter.EventMessageType.ALL)
 async def on_all_message(self, event: AstrMessageEvent):
-    yield event.plain_result("收到了一条消息。")
+    yield event.plain_result("Received a message.")
 ```
 
-#### 只接收某个消息平台的事件
+#### Group Chat and Private Chat
+
+```python
+@filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
+async def on_private_message(self, event: AstrMessageEvent):
+    message_str = event.message_str # Get the plain text content of the message
+    yield event.plain_result("Received a private message.")
+```
+
+`EventMessageType` is an `Enum` type that contains all event types. Current event types are `PRIVATE_MESSAGE` and `GROUP_MESSAGE`.
+
+#### Messaging Platform
 
 ```python
 @filter.platform_adapter_type(filter.PlatformAdapterType.AIOCQHTTP | filter.PlatformAdapterType.QQOFFICIAL)
 async def on_aiocqhttp(self, event: AstrMessageEvent):
-    '''只接收 AIOCQHTTP 和 QQOFFICIAL 的消息'''
-    yield event.plain_result("收到了一条信息")
+    '''Only receive messages from AIOCQHTTP and QQOFFICIAL'''
+    yield event.plain_result("Received a message")
 ```
 
-当前版本下，`PlatformAdapterType` 有 `AIOCQHTTP`, `QQOFFICIAL`, `GEWECHAT`, `ALL`。
+In the current version, `PlatformAdapterType` includes `AIOCQHTTP`, `QQOFFICIAL`, `GEWECHAT`, and `ALL`.
 
-### 限制管理员才能使用指令
+#### Admin Commands
 
 ```python
 @filter.permission_type(filter.PermissionType.ADMIN)
@@ -337,80 +412,80 @@ async def test(self, event: AstrMessageEvent):
     pass
 ```
 
-仅管理员才能使用 `test` 指令。
+Only admins can use the `test` command.
 
-#### 多个过滤器
+### Multiple Filters
 
-支持同时使用多个过滤器，只需要在函数上添加多个装饰器即可。过滤器使用 `AND` 逻辑。也就是说，只有所有的过滤器都通过了，才会执行函数。
+Multiple filters can be used simultaneously by adding multiple decorators to a function. Filters use `AND` logic, meaning the function will only execute if all filters pass.
 
 ```python
 @filter.command("helloworld")
 @filter.event_message_type(filter.EventMessageType.PRIVATE_MESSAGE)
 async def helloworld(self, event: AstrMessageEvent):
-    yield event.plain_result("你好！")
+    yield event.plain_result("Hello!")
 ```
 
-### 事件钩子【New】
+### Event Hooks
 
 > [!TIP]
-> 事件钩子不支持与上面的 @filter.command, @filter.command_group, @filter.event_message_type, @filter.platform_adapter_type, @filter.permission_type 一起使用。
+> Event hooks do not support being used together with @filter.command, @filter.command_group, @filter.event_message_type, @filter.platform_adapter_type, or @filter.permission_type.
 
-#### AstrBot 初始化完成时
+#### On Bot Initialization Complete
 
-> v3.4.34 后
+> Available after v3.4.34
 
 ```python
 from astrbot.api.event import filter, AstrMessageEvent
 
 @filter.on_astrbot_loaded()
 async def on_astrbot_loaded(self):
-    print("AstrBot 初始化完成")
+    print("AstrBot initialization complete")
 
 ```
 
-#### 收到 LLM 请求时
+#### On LLM Request
 
-在 AstrBot 默认的执行流程中，在调用 LLM 前，会触发 `on_llm_request` 钩子。
+In AstrBot's default execution flow, the `on_llm_request` hook is triggered before calling the LLM.
 
-可以获取到 `ProviderRequest` 对象，可以对其进行修改。
+You can obtain the `ProviderRequest` object and modify it.
 
-ProviderRequest 对象包含了 LLM 请求的所有信息，包括请求的文本、系统提示等。
+The ProviderRequest object contains all information about the LLM request, including the request text, system prompt, etc.
 
 ```python
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.provider import ProviderRequest
 
 @filter.on_llm_request()
-async def my_custom_hook_1(self, event: AstrMessageEvent, req: ProviderRequest): # 请注意有三个参数
-    print(req) # 打印请求的文本
-    req.system_prompt += "自定义 system_prompt"
+async def my_custom_hook_1(self, event: AstrMessageEvent, req: ProviderRequest): # Note there are three parameters
+    print(req) # Print the request text
+    req.system_prompt += "Custom system_prompt"
 
 ```
 
-> 这里不能使用 yield 来发送消息。如需发送，请直接使用 `event.send()` 方法。
+> You cannot use yield to send messages here. If you need to send, please use the `event.send()` method directly.
 
-#### LLM 请求完成时
+#### On LLM Response Complete
 
-在 LLM 请求完成后，会触发 `on_llm_response` 钩子。
+After the LLM request completes, the `on_llm_response` hook is triggered.
 
-可以获取到 `ProviderResponse` 对象，可以对其进行修改。
+You can obtain the `ProviderResponse` object and modify it.
 
 ```python
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.provider import LLMResponse
 
 @filter.on_llm_response()
-async def on_llm_resp(self, event: AstrMessageEvent, resp: LLMResponse): # 请注意有三个参数
+async def on_llm_resp(self, event: AstrMessageEvent, resp: LLMResponse): # Note there are three parameters
     print(resp)
 ```
 
-> 这里不能使用 yield 来发送消息。如需发送，请直接使用 `event.send()` 方法。
+> You cannot use yield to send messages here. If you need to send, please use the `event.send()` method directly.
 
-#### 发送消息给消息平台适配器前
+#### Before Sending Message
 
-在发送消息前，会触发 `on_decorating_result` 钩子。
+Before sending a message, the `on_decorating_result` hook is triggered.
 
-可以在这里实现一些消息的装饰，比如转语音、转图片、加前缀等等
+You can implement some message decoration here, such as converting to voice, converting to image, adding prefixes, etc.
 
 ```python
 from astrbot.api.event import filter, AstrMessageEvent
@@ -419,15 +494,15 @@ from astrbot.api.event import filter, AstrMessageEvent
 async def on_decorating_result(self, event: AstrMessageEvent):
     result = event.get_result()
     chain = result.chain
-    print(chain) # 打印消息链
-    chain.append(Plain("!")) # 在消息链的最后添加一个感叹号
+    print(chain) # Print the message chain
+    chain.append(Plain("!")) # Add an exclamation mark at the end of the message chain
 ```
 
-> 这里不能使用 yield 来发送消息。这个钩子只是用来装饰 event.get_result().chain 的。如需发送，请直接使用 `event.send()` 方法。
+> You cannot use yield to send messages here. This hook is only for decorating event.get_result().chain. If you need to send, please use the `event.send()` method directly.
 
-#### 发送消息给消息平台适配器后
+#### After Message Sent
 
-在发送消息给消息平台后，会触发 `after_message_sent` 钩子。
+After a message is sent to the messaging platform, the `after_message_sent` hook is triggered.
 
 ```python
 from astrbot.api.event import filter, AstrMessageEvent
@@ -437,13 +512,11 @@ async def after_message_sent(self, event: AstrMessageEvent):
     pass
 ```
 
-> 这里不能使用 yield 来发送消息。如需发送，请直接使用 `event.send()` 方法。
+> You cannot use yield to send messages here. If you need to send, please use the `event.send()` method directly.
 
-### 优先级
+### Priority
 
-> 大于等于 v3.4.21。
-
-指令、事件监听器、事件钩子可以设置优先级，先于其他指令、监听器、钩子执行。默认优先级是 `0`。
+Commands, event listeners, and event hooks can have priority set to execute before other commands, listeners, or hooks. The default priority is `0`.
 
 ```python
 @filter.command("helloworld", priority=1)
@@ -451,122 +524,28 @@ async def helloworld(self, event: AstrMessageEvent):
     yield event.plain_result("Hello!")
 ```
 
-### 会话控制 [NEW]
+## Controlling Event Propagation
 
-> 大于等于 v3.4.36
-
-为什么需要会话控制？考虑一个 成语接龙 插件，某个/群用户需要和机器人进行多次对话，而不是一次性的指令。这时候就需要会话控制。
-
-```txt
-用户: /成语接龙
-机器人: 请发送一个成语
-用户: 一马当先
-机器人: 先见之明
-用户: 明察秋毫
-...
+```python{6}
+@filter.command("check_ok")
+async def check_ok(self, event: AstrMessageEvent):
+    ok = self.check() # Your own logic
+    if not ok:
+        yield event.plain_result("Check failed")
+        event.stop_event() # Stop event propagation
 ```
 
-AstrBot 提供了开箱即用的会话控制功能：
+When event propagation is stopped, all subsequent steps will not be executed.
 
-导入：
+Assuming there's a plugin A, after A terminates event propagation, all subsequent operations will not be executed, such as executing other plugins' handlers or requesting the LLM.
 
-```py
-import astrbot.api.message_components as Comp
-from astrbot.core.utils.session_waiter import (
-    session_waiter,
-    SessionController,
-)
-```
+---
 
-handler 内的代码可以如下：
+# Sending Messages
 
-```python
-from astrbot.api.event import filter, AstrMessageEvent
+## Passive Messages
 
-@filter.command("成语接龙")
-async def handle_empty_mention(self, event: AstrMessageEvent):
-    """成语接龙具体实现"""
-    try:
-        yield event.plain_result("请发送一个成语~")
-
-        # 具体的会话控制器使用方法
-        @session_waiter(timeout=60, record_history_chains=False) # 注册一个会话控制器，设置超时时间为 60 秒，不记录历史消息链
-        async def empty_mention_waiter(controller: SessionController, event: AstrMessageEvent):
-            idiom = event.message_str # 用户发来的成语，假设是 "一马当先"
-
-            if idiom == "退出":   # 假设用户想主动退出成语接龙，输入了 "退出"
-                await event.send(event.plain_result("已退出成语接龙~"))
-                controller.stop()    # 停止会话控制器，会立即结束。
-                return
-
-            if len(idiom) != 4:   # 假设用户输入的不是4字成语
-                await event.send(event.plain_result("成语必须是四个字的呢~"))  # 发送回复，不能使用 yield
-                return
-                # 退出当前方法，不执行后续逻辑，但此会话并未中断，后续的用户输入仍然会进入当前会话
-
-            # ...
-            message_result = event.make_result()
-            message_result.chain = [Comp.Plain("先见之明")] # import astrbot.api.message_components as Comp
-            await event.send(message_result) # 发送回复，不能使用 yield
-
-            controller.keep(timeout=60, reset_timeout=True) # 重置超时时间为 60s，如果不重置，则会继续之前的超时时间计时。
-
-            # controller.stop() # 停止会话控制器，会立即结束。
-            # 如果记录了历史消息链，可以通过 controller.get_history_chains() 获取历史消息链
-
-        try:
-            await empty_mention_waiter(event)
-        except TimeoutError as _: # 当超时后，会话控制器会抛出 TimeoutError
-            yield event.plain_result("你超时了！")
-        except Exception as e:
-            yield event.plain_result("发生错误，请联系管理员: " + str(e))
-        finally:
-            event.stop_event()
-    except Exception as e:
-        logger.error("handle_empty_mention error: " + str(e))
-```
-
-当激活会话控制器后，该发送人之后发送的消息会首先经过上面你定义的 `empty_mention_waiter` 函数处理，直到会话控制器被停止或者超时。
-
-#### SessionController
-
-用于开发者控制这个会话是否应该结束，并且可以拿到历史消息链。
-
-- keep(): 保持这个会话
-  - timeout (float): 必填。会话超时时间。
-  - reset_timeout (bool): 设置为 True 时, 代表重置超时时间, timeout 必须 > 0, 如果 <= 0 则立即结束会话。设置为 False 时, 代表继续维持原来的超时时间, 新 timeout = 原来剩余的 timeout + timeout (可以 < 0)
-- stop(): 结束这个会话
-- get_history_chains() -> List[List[Comp.BaseMessageComponent]]: 获取历史消息链
-
-#### 自定义会话 ID 算子
-
-默认情况下，AstrBot 会话控制器会将基于 `sender_id` （发送人的 ID）作为识别不同会话的标识，如果想将一整个群作为一个会话，则需要自定义会话 ID 算子。
-
-```py
-import astrbot.api.message_components as Comp
-from astrbot.core.utils.session_waiter import (
-    session_waiter,
-    SessionFilter,
-    SessionController,
-)
-
-# 沿用上面的 handler
-# ...
-class CustomFilter(SessionFilter):
-    def filter(self, event: AstrMessageEvent) -> str:
-        return event.get_group_id() if event.get_group_id() else event.unified_msg_origin
-
-await empty_mention_waiter(event, session_filter=CustomFilter()) # 这里传入 session_filter
-# ...
-```
-
-这样之后，当群内一个用户发送消息后，会话控制器会将这个群作为一个会话，群内其他用户发送的消息也会被认为是同一个会话。
-
-甚至，可以使用这个特性来让群内组队！
-
-### 发送消息
-
-上面介绍的都是基于 `yield` 的方式，也就是异步生成器。这样的好处是可以在一个函数中多次发送消息。
+Passive messages refer to the bot responding to messages reactively.
 
 ```python
 @filter.command("helloworld")
@@ -574,13 +553,15 @@ async def helloworld(self, event: AstrMessageEvent):
     yield event.plain_result("Hello!")
     yield event.plain_result("你好！")
 
-    yield event.image_result("path/to/image.jpg") # 发送图片
-    yield event.image_result("https://example.com/image.jpg") # 发送 URL 图片，务必以 http 或 https 开头
+    yield event.image_result("path/to/image.jpg") # Send an image
+    yield event.image_result("https://example.com/image.jpg") # Send an image from URL, must start with http or https
 ```
 
-**主动消息**
+## Active Messages
 
-如果是一些定时任务或者不想立即发送消息，可以使用 `event.unified_msg_origin` 得到一个字符串并将其存储，然后在想发送消息的时候使用 `self.context.send_message(unified_msg_origin, chains)` 来发送消息。
+Active messages refer to the bot proactively pushing messages. Some platforms may not support active message sending.
+
+For scheduled tasks or when you don't want to send messages immediately, you can use `event.unified_msg_origin` to get a string and store it, then use `self.context.send_message(unified_msg_origin, chains)` to send messages when needed.
 
 ```python
 from astrbot.api.event import MessageChain
@@ -592,15 +573,15 @@ async def helloworld(self, event: AstrMessageEvent):
     await self.context.send_message(event.unified_msg_origin, message_chain)
 ```
 
-通过这个特性，你可以将 unified_msg_origin 存储起来，然后在需要的时候发送消息。
+With this feature, you can store the `unified_msg_origin` and send messages when needed.
 
 > [!TIP]
-> 关于 unified_msg_origin。
-> unified_msg_origin 是一个字符串，记录了一个会话的唯一 ID，AstrBot 能够据此找到属于哪个消息平台的哪个会话。这样就能够实现在 `send_message` 的时候，发送消息到正确的会话。有关 MessageChain，请参见接下来的一节。
+> About unified_msg_origin.
+> `unified_msg_origin` is a string that records the unique ID of a session. AstrBot uses it to identify which messaging platform and which session it belongs to. This allows messages to be sent to the correct session when using `send_message`. For more about MessageChain, see the next section.
 
-### 发送图文等富媒体消息
+## Rich Media Messages
 
-AstrBot 支持发送富媒体消息，比如图片、语音、视频等。使用 `MessageChain` 来构建消息。
+AstrBot supports sending rich media messages such as images, audio, videos, etc. Use `MessageChain` to construct messages.
 
 ```python
 import astrbot.api.message_components as Comp
@@ -608,33 +589,36 @@ import astrbot.api.message_components as Comp
 @filter.command("helloworld")
 async def helloworld(self, event: AstrMessageEvent):
     chain = [
-        Comp.At(qq=event.get_sender_id()), # At 消息发送者
-        Comp.Plain("来看这个图："),
-        Comp.Image.fromURL("https://example.com/image.jpg"), # 从 URL 发送图片
-        Comp.Image.fromFileSystem("path/to/image.jpg"), # 从本地文件目录发送图片
-        Comp.Plain("这是一个图片。")
+        Comp.At(qq=event.get_sender_id()), # Mention the message sender
+        Comp.Plain("Check out this image:"),
+        Comp.Image.fromURL("https://example.com/image.jpg"), # Send image from URL
+        Comp.Image.fromFileSystem("path/to/image.jpg"), # Send image from local file system
+        Comp.Plain("This is an image.")
     ]
     yield event.chain_result(chain)
 ```
 
-上面构建了一个 `message chain`，也就是消息链，最终会发送一条包含了图片和文字的消息，并且保留顺序。
+The above constructs a `message chain`, which will ultimately send a message containing both images and text while preserving the order.
 
-类似地，
+> [!TIP]
+> In the aiocqhttp message adapter, for messages of type `plain`, the `strip()` method is used during sending to remove spaces and line breaks. You can add zero-width spaces `\u200b` before and after the message to resolve this issue.
 
-**文件 File**
+Similarly,
+
+**File**
 
 ```py
-Comp.File(file="path/to/file.txt", name="file.txt") # 部分平台不支持
+Comp.File(file="path/to/file.txt", name="file.txt") # Not supported by some platforms
 ```
 
-**语音 Record**
+**Audio Record**
 
 ```py
-path = "path/to/record.wav" # 暂时只接受 wav 格式，其他格式请自行转换
+path = "path/to/record.wav" # Currently only accepts wav format, please convert other formats yourself
 Comp.Record(file=path, url=path)
 ```
 
-**视频 Video**
+**Video**
 
 ```py
 path = "path/to/video.mp4"
@@ -642,13 +626,34 @@ Comp.Video.fromFileSystem(path=path)
 Comp.Video.fromURL(url="https://example.com/video.mp4")
 ```
 
-### 发送群合并转发消息
-
-> 当前适配情况：aiocqhttp
-
-可以按照如下方式发送群合并转发消息。
+## Sending Video Messages
 
 ```python
+from astrbot.api.event import filter, AstrMessageEvent
+
+@filter.command("test")
+async def test(self, event: AstrMessageEvent):
+    from astrbot.api.message_components import Video
+    # fromFileSystem requires the user's protocol client and bot to be on the same system.
+    music = Video.fromFileSystem(
+        path="test.mp4"
+    )
+    # More universal approach
+    music = Video.fromURL(
+        url="https://example.com/video.mp4"
+    )
+    yield event.chain_result([music])
+```
+
+![Sending video messages](https://files.astrbot.app/docs/source/images/plugin/db93a2bb-671c-4332-b8ba-9a91c35623c2.png)
+
+## Sending Group Forward Messages
+
+> Most platforms do not support this message type. Current support: OneBot v11
+
+You can send group forward messages as follows.
+
+```py
 from astrbot.api.event import filter, AstrMessageEvent
 
 @filter.command("test")
@@ -665,140 +670,521 @@ async def test(self, event: AstrMessageEvent):
     yield event.chain_result([node])
 ```
 
-![发送群合并转发消息](../../source/images/plugin/image-4.png)
+![Sending group forward messages](https://files.astrbot.app/docs/source/images/plugin/image-4.png)
 
-### 发送视频消息
+---
 
-> 当前适配情况：aiocqhttp
+# AI
 
-```python
-from astrbot.api.event import filter, AstrMessageEvent
+AstrBot provides built-in support for multiple Large Language Model (LLM) providers and offers a unified interface, making it convenient for plugin developers to access various LLM services.
 
-@filter.command("test")
-async def test(self, event: AstrMessageEvent):
-    from astrbot.api.message_components import Video
-    # fromFileSystem 需要用户的协议端和机器人端处于一个系统中。
-    music = Video.fromFileSystem(
-        path="test.mp4"
-    )
-    # 更通用
-    music = Video.fromURL(
-        url="https://example.com/video.mp4"
-    )
-    yield event.chain_result([music])
-```
+You can use the LLM / Agent interfaces provided by AstrBot to implement your own intelligent agents.
 
-![发送视频消息](../../source/images/plugin/db93a2bb-671c-4332-b8ba-9a91c35623c2.png)
+Starting from version `v4.5.7`, we've made significant improvements to the way LLM providers are invoked. We recommend using the new approach, which is more concise and supports additional features. The legacy invocation method remains documented in the previous Chinese-only guide.
 
-### 发送 QQ 表情
+## Getting the Chat Model ID for the Current Session
 
-> 当前适配情况：仅 aiocqhttp
-
-QQ 表情 ID 参考：https://bot.q.qq.com/wiki/develop/api-v2/openapi/emoji/model.html#EmojiType
-
-```python
-from astrbot.api.event import filter, AstrMessageEvent
-
-@filter.command("test")
-async def test(self, event: AstrMessageEvent):
-    from astrbot.api.message_components import Face, Plain
-    yield event.chain_result([Face(id=21), Plain("你好呀")])
-```
-
-![发送 QQ 表情](../../source/images/plugin/image-5.png)
-
-### 获取平台适配器/客户端
-
-> v3.4.34 后
-
-```python
-from astrbot.api.event import filter, AstrMessageEvent
-
-@filter.command("test")
-async def test_(self, event: AstrMessageEvent):
-    from astrbot.api.platform import AiocqhttpAdapter # 其他平台同理
-    platform = self.context.get_platform(filter.PlatformAdapterType.AIOCQHTTP)
-    assert isinstance(platform, AiocqhttpAdapter)
-    # platform.get_client().api.call_action()
-```
-
-### [aiocqhttp] 直接调用协议端 API
+> [!TIP]
+> Added in v4.5.7
 
 ```py
-@filter.command("helloworld")
-async def helloworld(self, event: AstrMessageEvent):
-    if event.get_platform_name() == "aiocqhttp":
-        # qq
-        from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import AiocqhttpMessageEvent
-        assert isinstance(event, AiocqhttpMessageEvent)
-        client = event.bot # 得到 client
-        payloads = {
-            "message_id": event.message_obj.message_id,
+umo = event.unified_msg_origin
+provider_id = await self.context.get_current_chat_provider_id(umo=umo)
+```
+
+## Invoking Large Language Models
+
+> [!TIP]
+> Added in v4.5.7
+
+
+```py
+llm_resp = await self.context.llm_generate(
+    chat_provider_id=provider_id, # Chat model ID
+    prompt="Hello, world!",
+)
+# print(llm_resp.completion_text) # Get the returned text
+```
+
+## Defining Tools
+
+Tools enable large language models to invoke external capabilities.
+
+```py
+from pydantic import Field
+from pydantic.dataclasses import dataclass
+
+from astrbot.core.agent.run_context import ContextWrapper
+from astrbot.core.agent.tool import FunctionTool, ToolExecResult
+from astrbot.core.astr_agent_context import AstrAgentContext
+
+
+@dataclass
+class BilibiliTool(FunctionTool[AstrAgentContext]):
+    name: str = "bilibili_videos"  # Tool name
+    description: str = "A tool to fetch Bilibili videos."  # Tool description
+    parameters: dict = Field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "keywords": {
+                    "type": "string",
+                    "description": "Keywords to search for Bilibili videos.",
+                },
+            },
+            "required": ["keywords"],
         }
-        ret = await client.api.call_action('delete_msg', **payloads) # 调用 协议端  API
-        logger.info(f"delete_msg: {ret}")
+    )
+
+    async def call(
+        self, context: ContextWrapper[AstrAgentContext], **kwargs
+    ) -> ToolExecResult:
+        return "1. Video Title: How to Use AstrBot\nVideo Link: xxxxxx"
 ```
 
-关于 CQHTTP API，请参考如下文档：
+## Invoking Agents
 
-Napcat API 文档：https://napcat.apifox.cn/
+> [!TIP]
+> Added in v4.5.7
 
-Lagrange API 文档：https://lagrange-onebot.apifox.cn/
 
-### [gewechat] 平台发送消息
+An Agent can be defined as a combination of system_prompt + tools + llm, enabling more sophisticated intelligent behavior.
+
+After defining the Tool above, you can invoke an Agent as follows:
 
 ```py
-@filter.command("helloworld")
-async def helloworld(self, event: AstrMessageEvent):
-    if event.get_platform_name() == "gewechat":
-        from astrbot.core.platform.sources.gewechat.gewechat_platform_adapter import GewechatPlatformAdapter
-        assert isinstance(event, GewechatPlatformEvent)
-        client = event.client
-        to_wxid = self.message_obj.raw_message.get('to_wxid', None)
-        # await client.post_text()
-        # await client.post_image()
-        # await client.post_voice()
+llm_resp = await self.context.tool_loop_agent(
+    event=event,
+    chat_provider_id=prov_id,
+    prompt="Search for videos related to AstrBot on Bilibili.",
+    tools=ToolSet([BilibiliTool()]),
+    max_steps=30, # Maximum agent execution steps
+    tool_call_timeout=60, # Tool invocation timeout
+)
+# print(llm_resp.completion_text) # Get the returned text
 ```
 
-### 控制事件传播
+`tool_loop_agent()` method automatically handles the loop of tool invocations and LLM requests until the model stops calling tools or the maximum number of steps is reached.
 
-```python{6}
-@filter.command("check_ok")
-async def check_ok(self, event: AstrMessageEvent):
-    ok = self.check() # 自己的逻辑
-    if not ok:
-        yield event.plain_result("检查失败")
-        event.stop_event() # 停止事件传播
+## Multi-Agent
+
+> [!TIP]
+> Added in v4.5.7
+
+
+Multi-Agent systems decompose complex applications into multiple specialized agents that collaborate to solve problems. Unlike relying on a single agent to handle every step, multi-agent architectures allow smaller, more focused agents to be composed into coordinated workflows. We implement multi-agent systems using the `agent-as-tool` pattern.
+
+In the example below, we define a Main Agent responsible for delegating tasks to different Sub-Agents based on user queries. Each Sub-Agent focuses on specific tasks, such as retrieving weather information.
+
+![multi-agent-example-1](https://files.astrbot.app/docs/en/dev/star/guides/multi-agent-example-1.svg)
+
+Define Tools:
+
+```py
+@dataclass
+class AssignAgentTool(FunctionTool[AstrAgentContext]):
+    """Main agent uses this tool to decide which sub-agent to delegate a task to."""
+
+    name: str = "assign_agent"
+    description: str = "Assign an agent to a task based on the given query"
+    parameters: dict = field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The query to call the sub-agent with.",
+                },
+            },
+            "required": ["query"],
+        }
+    )
+
+    async def call(
+        self, context: ContextWrapper[AstrAgentContext], **kwargs
+    ) -> str | CallToolResult:
+        # Here you would implement the actual agent assignment logic.
+        # For demonstration purposes, we'll return a dummy response.
+        return "Based on the query, you should assign agent 1."
+
+
+@dataclass
+class WeatherTool(FunctionTool[AstrAgentContext]):
+    """In this example, sub agent 1 uses this tool to get weather information."""
+
+    name: str = "weather"
+    description: str = "Get weather information for a location"
+    parameters: dict = field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "city": {
+                    "type": "string",
+                    "description": "The city to get weather information for.",
+                },
+            },
+            "required": ["city"],
+        }
+    )
+
+    async def call(
+        self, context: ContextWrapper[AstrAgentContext], **kwargs
+    ) -> str | CallToolResult:
+        city = kwargs["city"]
+        # Here you would implement the actual weather fetching logic.
+        # For demonstration purposes, we'll return a dummy response.
+        return f"The current weather in {city} is sunny with a temperature of 25°C."
+
+
+@dataclass
+class SubAgent1(FunctionTool[AstrAgentContext]):
+    """Define a sub-agent as a function tool."""
+
+    name: str = "subagent1_name"
+    description: str = "subagent1_description"
+    parameters: dict = field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The query to call the sub-agent with.",
+                },
+            },
+            "required": ["query"],
+        }
+    )
+
+    async def call(
+        self, context: ContextWrapper[AstrAgentContext], **kwargs
+    ) -> str | CallToolResult:
+        ctx = context.context.context
+        event = context.context.event
+        logger.info(f"the llm context messages: {context.messages}")
+        llm_resp = await ctx.tool_loop_agent(
+            event=event,
+            chat_provider_id=await ctx.get_current_chat_provider_id(
+                event.unified_msg_origin
+            ),
+            prompt=kwargs["query"],
+            tools=ToolSet([WeatherTool()]),
+            max_steps=30,
+        )
+        return llm_resp.completion_text
+
+
+@dataclass
+class SubAgent2(FunctionTool[AstrAgentContext]):
+    """Define a sub-agent as a function tool."""
+
+    name: str = "subagent2_name"
+    description: str = "subagent2_description"
+    parameters: dict = field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The query to call the sub-agent with.",
+                },
+            },
+            "required": ["query"],
+        }
+    )
+
+    async def call(
+        self, context: ContextWrapper[AstrAgentContext], **kwargs
+    ) -> str | CallToolResult:
+        return "I am useless :(, you shouldn't call me :("
 ```
 
-当事件停止传播，**后续所有步骤将不会被执行。**假设有一个插件 A，A 终止事件传播之后所有后续操作都不会执行，比如执行其它插件的 handler、请求 LLM。
+Then, similarly, invoke the Agent using the `tool_loop_agent()` method:
 
-### 注册插件配置(beta)
+```py
+@filter.command("test")
+async def test(self, event: AstrMessageEvent):
+    umo = event.unified_msg_origin
+    prov_id = await self.context.get_current_chat_provider_id(umo)
+    llm_resp = await self.context.tool_loop_agent(
+        event=event,
+        chat_provider_id=prov_id,
+        prompt="Test calling sub-agent for Beijing's weather information.",
+        system_prompt=(
+            "You are the main agent. Your task is to delegate tasks to sub-agents based on user queries."
+            "Before delegating, use the 'assign_agent' tool to determine which sub-agent is best suited for the task."
+        ),
+        tools=ToolSet([SubAgent1(), SubAgent2(), AssignAgentTool()]),
+        max_steps=30,
+    )
+    yield event.plain_result(llm_resp.completion_text)
+```
 
-> 大于等于 v3.4.15
+## Conversation Manager
 
-随着插件功能的增加，可能需要定义一些配置以让用户自定义插件的行为。
+### Getting the Current LLM Conversation History for a Session
 
-AstrBot 提供了”强大“的配置解析和可视化功能。能够让用户在管理面板上直接配置插件，而不需要修改代码。
+```py
+from astrbot.core.conversation_mgr import Conversation
 
-![](../../source/images/plugin/QQ_1738149538737.png)
+uid = event.unified_msg_origin
+conv_mgr = self.context.conversation_manager
+curr_cid = await conv_mgr.get_curr_conversation_id(uid)
+conversation = await conv_mgr.get_conversation(uid, curr_cid)  # Conversation
+```
 
-**Schema 介绍**
+::: details Conversation 类型定义
 
-要注册配置，首先需要在您的插件目录下添加一个 `_conf_schema.json` 的 json 文件。
+```py
+@dataclass
+class Conversation:
+    """The conversation entity representing a chat session."""
 
-文件内容是一个 `Schema`（模式），用于表示配置。Schema 是 json 格式的，例如上图的 Schema 是：
+    platform_id: str
+    """The platform ID in AstrBot"""
+    user_id: str
+    """The user ID associated with the conversation."""
+    cid: str
+    """The conversation ID, in UUID format."""
+    history: str = ""
+    """The conversation history as a string."""
+    title: str | None = ""
+    """The title of the conversation. For now, it's only used in WebChat."""
+    persona_id: str | None = ""
+    """The persona ID associated with the conversation."""
+    created_at: int = 0
+    """The timestamp when the conversation was created."""
+    updated_at: int = 0
+    """The timestamp when the conversation was last updated."""
+```
+
+:::
+
+### Main Methods
+
+#### `new_conversation`
+
+- **Usage**  
+  Create a new conversation in the current session and automatically switch to it.
+- **Arguments**  
+  - `unified_msg_origin: str` – In the format `platform_name:message_type:session_id`  
+  - `platform_id: str | None` – Platform identifier, defaults to parsing from `unified_msg_origin`  
+  - `content: list[dict] | None` – Initial message history  
+  - `title: str | None` – Conversation title  
+  - `persona_id: str | None` – Associated persona ID
+- **Returns**  
+  `str` – Newly generated UUID conversation ID
+
+#### `switch_conversation`
+
+- **Usage**  
+  Switch the session to a specified conversation.
+- **Arguments**  
+  - `unified_msg_origin: str`  
+  - `conversation_id: str`
+- **Returns**  
+  `None`
+
+#### `delete_conversation`
+
+- **Usage**  
+  Delete a conversation from the session; if `conversation_id` is `None`, deletes the current conversation.
+- **Arguments**  
+  - `unified_msg_origin: str`  
+  - `conversation_id: str | None`
+- **Returns**  
+  `None`
+
+#### `get_curr_conversation_id`
+
+- **Usage**  
+  Get the conversation ID currently in use by the session.
+- **Arguments**  
+  - `unified_msg_origin: str`
+- **Returns**  
+  `str | None` – Current conversation ID, returns `None` if it doesn't exist
+
+#### `get_conversation`
+
+- **Usage**  
+  Get the complete object for a specified conversation; automatically creates it if it doesn't exist and `create_if_not_exists=True`.
+- **Arguments**  
+  - `unified_msg_origin: str`  
+  - `conversation_id: str`  
+  - `create_if_not_exists: bool = False`
+- **Returns**  
+  `Conversation | None`
+
+#### `get_conversations`
+
+- **Usage**  
+  Retrieve the complete list of conversations for a user or platform.
+- **Arguments**  
+  - `unified_msg_origin: str | None` – When `None`, does not filter by user  
+  - `platform_id: str | None`
+- **Returns**  
+  `List[Conversation]`
+
+#### `update_conversation`
+
+- **Usage**  
+  Update the title, history, or persona_id of a conversation.
+- **Arguments**  
+  - `unified_msg_origin: str`  
+  - `conversation_id: str | None` – Uses the current conversation when `None`  
+  - `history: list[dict] | None`  
+  - `title: str | None`  
+  - `persona_id: str | None`
+- **Returns**  
+  `None`
+
+## Persona Manager
+
+`PersonaManager` is responsible for unified loading, caching, and providing CRUD interfaces for all Personas, while maintaining compatibility with the legacy persona format (v3) from before AstrBot 4.x.  
+During initialization, it automatically reads all personas from the database and generates v3-compatible data for seamless use with legacy code.
+
+```py
+persona_mgr = self.context.persona_manager
+```
+
+### Main Methods
+
+#### `get_persona`
+
+- **Usage**
+  Get persona data by persona ID.
+- **Arguments**
+  - `persona_id: str` – Persona ID
+- **Returns**
+  `Persona` – Persona data, returns None if it doesn't exist
+- **Raises**
+  `ValueError` – Raised when it doesn't exist
+
+#### `get_all_personas`
+
+- **Usage**  
+  Retrieve all personas from the database at once.
+- **Returns**  
+  `list[Persona]` – Persona list, may be empty
+
+#### `create_persona`
+
+- **Usage**  
+  Create a new persona and immediately write it to the database; automatically refreshes the local cache upon success.
+- **Arguments**  
+  - `persona_id: str` – New persona ID (unique)  
+  - `system_prompt: str` – System prompt  
+  - `begin_dialogs: list[str]` – Optional, opening dialogs (even number of entries, alternating user/assistant)  
+  - `tools: list[str]` – Optional, list of allowed tools; `None`=all tools, `[]`=disable all
+- **Returns**  
+  `Persona` – Newly created persona object
+- **Raises**  
+  `ValueError` – If `persona_id` already exists
+
+#### `update_persona`
+
+- **Usage**  
+  Update any fields of an existing persona and synchronize to database and cache.
+- **Arguments**  
+  - `persona_id: str` – Persona ID to update  
+  - `system_prompt: str` – Optional, new system prompt  
+  - `begin_dialogs: list[str]` – Optional, new opening dialogs  
+  - `tools: list[str]` – Optional, new tool list; semantics same as `create_persona`
+- **Returns**  
+  `Persona` – Updated persona object
+- **Raises**  
+  `ValueError` – If `persona_id` doesn't exist
+
+#### `delete_persona`
+
+- **Usage**  
+  Delete the specified persona and clean up both database and cache.
+- **Arguments**  
+  - `persona_id: str` – Persona ID to delete
+- **Raises**  
+  `ValueError` – If `persona_id` doesn't exist
+
+#### `get_default_persona_v3`
+
+- **Usage**  
+  Get the default persona (v3 format) to use based on the current session configuration.  
+  Falls back to `DEFAULT_PERSONALITY` if configuration doesn't specify one or the specified persona doesn't exist.
+- **Arguments**  
+  - `umo: str | MessageSession | None` – Session identifier, used to read user-level configuration
+- **Returns**  
+  `Personality` – Default persona object in v3 format
+
+::: details Persona / Personality 类型定义
+
+```py
+
+class Persona(SQLModel, table=True):
+    """Persona is a set of instructions for LLMs to follow.
+
+    It can be used to customize the behavior of LLMs.
+    """
+
+    __tablename__ = "personas"
+
+    id: int = Field(primary_key=True, sa_column_kwargs={"autoincrement": True})
+    persona_id: str = Field(max_length=255, nullable=False)
+    system_prompt: str = Field(sa_type=Text, nullable=False)
+    begin_dialogs: Optional[list] = Field(default=None, sa_type=JSON)
+    """a list of strings, each representing a dialog to start with"""
+    tools: Optional[list] = Field(default=None, sa_type=JSON)
+    """None means use ALL tools for default, empty list means no tools, otherwise a list of tool names."""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column_kwargs={"onupdate": datetime.now(timezone.utc)},
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "persona_id",
+            name="uix_persona_id",
+        ),
+    )
+
+
+class Personality(TypedDict):
+    """LLM Persona class.
+
+    Starting from v4.0.0 and later, it's recommended to use the Persona class above. Additionally, the mood_imitation_dialogs field has been deprecated.
+    """
+
+    prompt: str
+    name: str
+    begin_dialogs: list[str]
+    mood_imitation_dialogs: list[str]
+    """Mood imitation dialog preset. Deprecated since v4.0.0 and later."""
+    tools: list[str] | None
+    """Tool list. None means use all tools, empty list means don't use any tools"""
+```
+
+:::
+
+---
+
+# Plugin Configuration
+
+As plugin functionality grows, you may need to define configurations to allow users to customize plugin behavior.
+
+AstrBot provides "powerful" configuration parsing and visualization features. Users can configure plugins directly in the management panel without modifying code.
+
+## Configuration Definition
+
+To register configurations, first add a `_conf_schema.json` JSON file in your plugin directory.
+
+The file content is a `Schema` that represents the configuration. The Schema is in JSON format, for example:
 
 ```json
 {
   "token": {
     "description": "Bot Token",
     "type": "string",
-    "hint": "测试醒目提醒",
-    "obvious_hint": true
   },
   "sub_config": {
-    "description": "测试嵌套配置",
+    "description": "Test nested configuration",
     "type": "object",
     "hint": "xxxx",
     "items": {
@@ -823,69 +1209,352 @@ AstrBot 提供了”强大“的配置解析和可视化功能。能够让用户
 }
 ```
 
-- `type`: **此项必填**。配置的类型。支持 `string`, `text`, `int`, `float`, `bool`, `object`, `list`。当类型为 `text` 时，将会可视化为一个更大的可拖拽宽高的 textarea 组件，以适应大文本。
-- `description`: 可选。配置的描述。建议一句话描述配置的行为。
-- `hint`: 可选。配置的提示信息，表现在上图中右边的问号按钮，当鼠标悬浮在问号按钮上时显示。
-- `obvious_hint`: 可选。配置的 hint 是否醒目显示。如上图的 `token`。
-- `default`: 可选。配置的默认值。如果用户没有配置，将使用默认值。int 是 0，float 是 0.0，bool 是 False，string 是 ""，object 是 {}，list 是 []。
-- `items`: 可选。如果配置的类型是 `object`，需要添加 `items` 字段。`items` 的内容是这个配置项的子 Schema。理论上可以无限嵌套，但是不建议过多嵌套。
-- `invisible`: 可选。配置是否隐藏。默认是 `false`。如果设置为 `true`，则不会在管理面板上显示。
-- `options`: 可选。一个列表，如 `"options": ["chat", "agent", "workflow"]`。提供下拉列表可选项。
-- `editor_mode`: 可选。是否启用代码编辑器模式。需要 AstrBot >= `v3.5.10`, 低于这个版本不会报错，但不会生效。默认是 false。
-- `editor_language`: 可选。代码编辑器的代码语言，默认为 `json`。
-- `editor_theme`: 可选。代码编辑器的主题，可选值有 `vs-light`（默认）， `vs-dark`。
+- `type`: **Required**. The type of the configuration. Supports `string`, `text`, `int`, `float`, `bool`, `object`, `list`, `dict`, `template_list`, `file`. When the type is `text`, it will be visualized as a larger resizable textarea component to accommodate large text.
+- `description`: Optional. Description of the configuration. A one-sentence description of the configuration's behavior is recommended.
+- `hint`: Optional. Hint information for the configuration, displayed in the question mark button on the right in the image above, shown when hovering over it.
+- `obvious_hint`: Optional. Whether the configuration hint should be prominently displayed, like `token` in the image above.
+- `default`: Optional. The default value of the configuration. If the user hasn't configured it, the default value will be used. Default values: int is 0, float is 0.0, bool is False, string is "", object is {}, list is [].
+- `items`: Optional. If the configuration type is `object`, the `items` field needs to be added. The content of `items` is the sub-Schema of this configuration item. Theoretically, it can be nested infinitely, but excessive nesting is not recommended.
+- `invisible`: Optional. Whether the configuration is hidden. Default is `false`. If set to `true`, it will not be displayed in the management panel.
+- `options`: Optional. A list, such as `"options": ["chat", "agent", "workflow"]`. Provides dropdown list options.
+- `editor_mode`: Optional. Whether to enable code editor mode. Requires AstrBot >= `v3.5.10`. Versions below this won't report errors but won't take effect. Default is false.
+- `editor_language`: Optional. The code language for the code editor, defaults to `json`.
+- `editor_theme`: Optional. The theme for the code editor. Options are `vs-light` (default) and `vs-dark`.
+- `_special`: Optional. Used to call AstrBot's visualization features for provider selection, persona selection, knowledge base selection, etc. See details below.
 
-其中，如果启用了代码编辑器，效果如下图所示:
+When the code editor is enabled, it looks like this:
 
-![editor_mode](../../source/images/plugin/image-6.png)
+![editor_mode](https://files.astrbot.app/docs/source/images/plugin/image-6.png)
 
-![editor_mode_fullscreen](../../source/images/plugin/image-7.png)
+![editor_mode_fullscreen](https://files.astrbot.app/docs/source/images/plugin/image-7.png)
 
-**使用配置**
+The **_special** field is only available after v4.0.0. Currently supports `select_provider`, `select_provider_tts`, `select_provider_stt`, `select_persona`, allowing users to quickly select model providers, personas, and other data already configured in the WebUI. Results are all strings. Using select_provider as an example, it will present the following effect:
 
-AstrBot 在载入插件时会检测插件目录下是否有 `_conf_schema.json` 文件，如果有，会自动解析配置并保存在 `data/config/<plugin_name>_config.json` 下（依照 Schema 创建的配置文件实体），并在实例化插件类时传入给 `__init__()`。
+![image](https://files.astrbot.app/docs/source/images/plugin/image-select-provider.png)
+
+### `file` type schema
+
+Introduced in v4.13.0, this allows plugins to define file-upload configuration items to guide users to upload files required by the plugin.
+
+```json
+{
+  "demo_files": {
+    "type": "file",
+    "description": "Uploaded files for demo",
+    "default": [],
+    "file_types": ["pdf", "docx"]
+  }
+}
+```
+
+### `dict` type schema
+
+Used to visualize editing a Python `dict` type configuration. For example, AstrBot Core's custom extra body parameter configuration:
+
+```py
+"custom_extra_body": {
+  "description": "Custom request body parameters",
+  "type": "dict",
+  "items": {},
+  "hint": "Used to add extra parameters to requests, such as temperature, top_p, max_tokens, etc.",
+  "template_schema": {
+      "temperature": {
+          "name": "Temperature",
+          "description": "Temperature parameter",
+          "hint": "Controls randomness of output, typically 0-2. Higher is more random.",
+          "type": "float",
+          "default": 0.6,
+          "slider": {"min": 0, "max": 2, "step": 0.1},
+      },
+      "top_p": {
+          "name": "Top-p",
+          "description": "Top-p sampling",
+          "hint": "Nucleus sampling parameter, typically 0-1. Controls probability mass considered.",
+          "type": "float",
+          "default": 1.0,
+          "slider": {"min": 0, "max": 1, "step": 0.01},
+      },
+      "max_tokens": {
+          "name": "Max Tokens",
+          "description": "Maximum tokens",
+          "hint": "Maximum number of tokens to generate.",
+          "type": "int",
+          "default": 8192,
+      },
+  },
+}
+```
+
+### `template_list` type schema
+
+> [!NOTE]
+> Introduced in v4.10.4. For more details see: [#4208](https://github.com/AstrBotDevs/AstrBot/pull/4208)
+
+Plugin developers can add a template-style configuration to `_conf_schema` in the following format (somewhat similar to nested configs):
+
+```json
+ "field_id": {
+  "type": "template_list",
+  "description": "Template List Field",
+  "templates": {
+    "template_1": {
+        "name": "Template One",
+        "hint":"hint",
+        "items": {
+          "attr_a": {
+            "description": "Attribute A",
+            "type": "int",
+            "default": 10
+          },
+          "attr_b": {
+            "description": "Attribute B",
+            "hint": "This is a boolean attribute",
+            "type": "bool",
+            "default": true
+          }
+        }
+      },
+    "template_2": {
+      "name": "Template Two",
+      "hint":"hint",
+      "items": {
+        "attr_c": {
+          "description": "Attribute A",
+          "type": "int",
+          "default": 10
+        },
+        "attr_d": {
+          "description": "Attribute B",
+          "hint": "This is a boolean attribute",
+          "type": "bool",
+          "default": true
+        }
+      }
+    }
+  }
+}
+```
+
+Saved config example:
+
+```json
+"field_id": [
+    {
+        "__template_key": "template_1",
+        "attr_a": 10,
+        "attr_b": true
+    },
+    {
+        "__template_key": "template_2",
+        "attr_c": 10,
+        "attr_d": true
+    }
+]
+```
+
+<img width="1000" alt="image" src="https://github.com/user-attachments/assets/74876d30-11a4-491b-a7a0-8ebe8d603782" />
+
+
+## Using Configuration in Plugins
+
+When loading plugins, AstrBot will check if there's a `_conf_schema.json` file in the plugin directory. If it exists, it will automatically parse the configuration and save it under `data/config/<plugin_name>_config.json` (a configuration file entity created according to the Schema), and pass it to `__init__()` when instantiating the plugin class.
 
 ```py
 from astrbot.api import AstrBotConfig
 
-@register("config", "Soulter", "一个配置示例", "1.0.0")
 class ConfigPlugin(Star):
-    def __init__(self, context: Context, config: AstrBotConfig): # AstrBotConfig 继承自 Dict，拥有字典的所有方法
+    def __init__(self, context: Context, config: AstrBotConfig): # AstrBotConfig inherits from Dict and has all dictionary methods
         super().__init__(context)
         self.config = config
         print(self.config)
 
-        # 支持直接保存配置
-        # self.config.save_config() # 保存配置
+        # Supports direct configuration saving
+        # self.config.save_config() # Save configuration
 ```
 
-**配置版本管理**
+## Configuration Updates
 
-如果您在发布不同版本时更新了 Schema，请注意，AstrBot 会递归检查 Schema 的配置项，如果发现配置文件中缺失了某个配置项，会自动添加默认值。但是 AstrBot 不会删除配置文件中**多余的**配置项，即使这个配置项在新的 Schema 中不存在（您在新的 Schema 中删除了这个配置项）。
+When you update the Schema across different versions, AstrBot will recursively inspect the configuration items in the Schema, automatically adding default values for missing items and removing those that no longer exist.
 
-### 文字渲染成图片
+---
 
-AstrBot 支持将文字渲染成图片。
+# Session Control
+
+> v3.4.36 and above
+
+Why do we need session control? Consider a Chinese idiom chain game plugin where a user or group needs to have multiple conversations with the bot rather than a one-time command. This is when session control becomes necessary.
+
+```txt
+User: /idiom-chain
+Bot: Please send an idiom
+User: One horse takes the lead (一马当先)
+Bot: Foresight (先见之明)
+User: Keen observation (明察秋毫)
+...
+```
+
+AstrBot provides out-of-the-box session control functionality:
+
+Import:
+
+```py
+import astrbot.api.message_components as Comp
+from astrbot.core.utils.session_waiter import (
+    session_waiter,
+    SessionController,
+)
+```
+
+Code within the handler can be written as follows:
 
 ```python
-@filter.command("image") # 注册一个 /image 指令，接收 text 参数。
+from astrbot.api.event import filter, AstrMessageEvent
+
+@filter.command("idiom-chain")
+async def handle_empty_mention(self, event: AstrMessageEvent):
+    """Idiom chain game implementation"""
+    try:
+        yield event.plain_result("Please send an idiom~")
+
+        # How to use the session controller
+        @session_waiter(timeout=60, record_history_chains=False) # Register a session controller with a 60-second timeout, without recording message history
+        async def empty_mention_waiter(controller: SessionController, event: AstrMessageEvent):
+            idiom = event.message_str # The idiom sent by the user, e.g., "one horse takes the lead"
+
+            if idiom == "exit":   # If the user wants to exit the idiom chain game by typing "exit"
+                await event.send(event.plain_result("Exited the idiom chain game~"))
+                controller.stop()    # Stop the session controller, which will end immediately.
+                return
+
+            if len(idiom) != 4:   # If the user's input is not a 4-character idiom
+                await event.send(event.plain_result("The idiom must be four characters~"))  # Send a reply, cannot use yield
+                return
+                # Exit the current method without executing subsequent logic, but the session is not interrupted; subsequent user input will still enter the current session
+
+            # ...
+            message_result = event.make_result()
+            message_result.chain = [Comp.Plain("Foresight")] # import astrbot.api.message_components as Comp
+            await event.send(message_result) # Send a reply, cannot use yield
+
+            controller.keep(timeout=60, reset_timeout=True) # Reset timeout to 60s. If not reset, it will continue the previous timeout countdown.
+
+            # controller.stop() # Stop the session controller, which will end immediately.
+            # If history chains are recorded, you can retrieve them via controller.get_history_chains()
+
+        try:
+            await empty_mention_waiter(event)
+        except TimeoutError as _: # When timeout occurs, the session controller will raise TimeoutError
+            yield event.plain_result("You timed out!")
+        except Exception as e:
+            yield event.plain_result("An error occurred, please contact the administrator: " + str(e))
+        finally:
+            event.stop_event()
+    except Exception as e:
+        logger.error("handle_empty_mention error: " + str(e))
+```
+
+Once the session controller is activated, messages subsequently sent by that sender will first be processed by the `empty_mention_waiter` function you defined above, until the session controller is stopped or times out.
+
+## SessionController
+
+Used by developers to control whether a session should end, and to retrieve message history chains.
+
+- keep(): Keep this session alive
+  - timeout (float): Required. Session timeout duration.
+  - reset_timeout (bool): When set to True, it resets the timeout; timeout must be > 0, if <= 0 the session ends immediately. When set to False, it maintains the original timeout; new timeout = remaining timeout + timeout (can be < 0)
+- stop(): End this session
+- get_history_chains() -> List[List[Comp.BaseMessageComponent]]: Retrieve message history chains
+
+## Custom Session ID Filter
+
+By default, the AstrBot session controller uses `sender_id` (the sender's ID) as the identifier for distinguishing different sessions. If you want to treat an entire group as one session, you need to customize the session ID filter.
+
+```py
+import astrbot.api.message_components as Comp
+from astrbot.core.utils.session_waiter import (
+    session_waiter,
+    SessionFilter,
+    SessionController,
+)
+
+# Using the handler from above
+# ...
+class CustomFilter(SessionFilter):
+    def filter(self, event: AstrMessageEvent) -> str:
+        return event.get_group_id() if event.get_group_id() else event.unified_msg_origin
+
+await empty_mention_waiter(event, session_filter=CustomFilter()) # Pass in session_filter here
+# ...
+```
+
+After this setup, when a user in a group sends a message, the session controller will treat the entire group as one session, and messages from other users in the group will also be considered part of the same session.
+
+You can even use this feature to enable team-based activities within groups!
+
+---
+
+# Plugin Storage
+
+## Simple KV Storage
+
+> [!TIP]
+> Requires AstrBot version >= 4.9.2.
+
+Plugins can use AstrBot's simple key-value store to persist configuration or temporary data. The storage is scoped per plugin, so each plugin has its own isolated space.
+
+```py
+class Main(star.Star):
+    @filter.command("hello")
+    async def hello(self, event: AstrMessageEvent):
+        """Aloha!"""
+        await self.put_kv_data("greeted", True)
+        greeted = await self.get_kv_data("greeted", False)
+        await self.delete_kv_data("greeted")
+```
+
+
+## Large File Storage Convention
+
+To keep large file handling consistent, store large files under `data/plugin_data/{plugin_name}/`.
+
+You can fetch the plugin data directory with:
+
+```py
+from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+
+plugin_data_path = get_astrbot_data_path() / "plugin_data" / self.name  # self.name is the plugin name; available in v4.9.2 and above. For lower versions, specify the plugin name yourself.
+```
+
+---
+
+# Text to Image
+
+> [!TIP]
+> For easier development, you can use the [AstrBot Text2Image Playground](https://t2i-playground.astrbot.app/) for online visual editing and testing of HTML templates.
+
+## Basic Usage
+
+AstrBot supports rendering text into images.
+
+```python
+@filter.command("image") # Register an /image command that accepts a text parameter.
 async def on_aiocqhttp(self, event: AstrMessageEvent, text: str):
-    url = await self.text_to_image(text) # text_to_image() 是 Star 类的一个方法。
-    # path = await self.text_to_image(text, return_url = False) # 如果你想保存图片到本地
+    url = await self.text_to_image(text) # text_to_image() is a method of the Star class.
+    # path = await self.text_to_image(text, return_url = False) # If you want to save the image locally
     yield event.image_result(url)
 
 ```
 
-![](../../source/images/plugin/image-3.png)
+![image](https://files.astrbot.app/docs/source/images/plugin/image-3.png)
 
-### 自定义 HTML 渲染成图片
+## Customization (HTML-Based)
 
-如果你觉得上面渲染出来的图片不够美观，你可以使用自定义的 HTML 模板来渲染图片。
+If you find the default rendered images insufficiently aesthetic, you can use custom HTML templates to render images.
 
-AstrBot 支持使用 `HTML + Jinja2` 的方式来渲染文转图模板。
+AstrBot supports rendering text-to-image templates using `HTML + Jinja2`.
 
-```py{7,15}
-# 自定义的 Jinja2 模板，支持 CSS
+```py{7}
+# Custom Jinja2 template with CSS support
 TMPL = '''
 <div style="font-size: 32px;">
 <h1 style="color: black">Todo List</h1>
@@ -899,218 +1568,649 @@ TMPL = '''
 
 @filter.command("todo")
 async def custom_t2i_tmpl(self, event: AstrMessageEvent):
-    url = await self.html_render(TMPL, {"items": ["吃饭", "睡觉", "玩原神"]}) # 第二个参数是 Jinja2 的渲染数据
+    options = {} # Optionally pass rendering options.
+    url = await self.html_render(TMPL, {"items": ["Eat", "Sleep", "Play Genshin"]}, options=options) # The second parameter is the data for Jinja2 rendering
     yield event.image_result(url)
 ```
 
-返回的结果:
+The result:
 
-![](../../source/images/plugin/fcc2dcb472a91b12899f617477adc5c7.png)
+![image](https://files.astrbot.app/docs/source/images/plugin/fcc2dcb472a91b12899f617477adc5c7.png)
 
-> 这只是一个简单的例子。得益于 HTML 和 DOM 渲染器的强大性，你可以进行更复杂和更美观的的设计。除此之外，Jinja2 支持循环、条件等语法以适应列表、字典等数据结构。你可以从网上了解更多关于 Jinja2 的知识。
+This is just a simple example. Thanks to the powerful capabilities of HTML and DOM renderers, you can create more complex and visually appealing designs. Additionally, Jinja2 supports syntax for loops, conditionals, and more to accommodate data structures like lists and dictionaries. You can learn more about Jinja2 online.
 
-### 调用 LLM
+**Image Rendering Options (options)**:
 
-AstrBot 支持调用大语言模型。你可以通过 `self.context.get_using_provider()` 来获取当前使用的大语言模型提供商，但是需要启用大语言模型。
+Please refer to Playwright's [screenshot](https://playwright.dev/python/docs/api/class-page#page-screenshot) API.
 
-```python
-from astrbot.api.event import filter, AstrMessageEvent
-
-@filter.command("test")
-async def test(self, event: AstrMessageEvent):
-    func_tools_mgr = self.context.get_llm_tool_manager()
-
-    # 获取用户当前与 LLM 的对话以获得上下文信息。
-    curr_cid = await self.context.conversation_manager.get_curr_conversation_id(event.unified_msg_origin) # 当前用户所处对话的对话id，是一个 uuid。
-    conversation = None # 对话对象
-    context = [] # 上下文列表
-    if curr_cid:
-        conversation = await self.context.conversation_manager.get_conversation(event.unified_msg_origin, curr_cid)
-        context = json.loads(conversation.history)
-    # 可以用这个方法自行为用户新建一个对话
-    # curr_cid = await self.context.conversation_manager.new_conversation(event.unified_msg_origin)
-
-    # 方法1. 最底层的调用 LLM 的方式, 如果启用了函数调用，不会进行产生任何副作用（不会调用函数工具,进行对话管理等），只是会回传所调用的函数名和参数
-    llm_response = await self.context.get_using_provider().text_chat(
-        prompt="你好",
-        session_id=None, # 此已经被废弃
-        contexts=[], # 也可以用上面获得的用户当前的对话记录 context
-        image_urls=[], # 图片链接，支持路径和网络链接
-        func_tool=func_tools_mgr, # 当前用户启用的函数调用工具。如果不需要，可以不传
-        system_prompt=""  # 系统提示，可以不传
-    )
-    # contexts 是历史记录。格式与 OpenAI 的上下文格式格式一致。即使用户正在使用 gemini，也会自动转换为 OpenAI 的上下文格式
-    # contexts = [
-    #     { "role": "system", "content": "你是一个助手。"},
-    #     { "role": "user", "content": "你好"}
-    # ]
-    # text_chat() 将会将 contexts 和 prompt,image_urls 合并起来形成一个上下文，然后调用 LLM 进行对话
-    if llm_response.role == "assistant":
-        print(llm_response.completion_text) # 回复的文本
-    elif llm_response.role == "tool":
-        print(llm_response.tools_call_name, llm_response.tools_call_args) # 调用的函数工具的函数名和参数
-    print(llm_response.raw_completion) # LLM 的原始响应，OpenAI 格式。其存储了包括 tokens 使用在内的所有信息。可能为 None，请注意处理
-
-    # 方法2. 以下方法将会经过 AstrBot 内部的 LLM 处理机制。会自动执行函数工具等。结果将会直接发给用户。
-    yield event.request_llm(
-        prompt="你好",
-        func_tool_manager=func_tools_mgr,
-        session_id=curr_cid, # 对话id。如果指定了对话id，将会记录对话到数据库
-        contexts=context, # 列表。如果不为空，将会使用此上下文与 LLM 对话。
-        system_prompt="",
-        image_urls=[], # 图片链接，支持路径和网络链接
-        conversation=conversation # 如果指定了对话，将会记录对话
-    )
-```
-
-### 注册一个 LLM 函数工具
-
-`function-calling` 给了大语言模型调用外部工具的能力。
-
-注册一个 `function-calling` 函数工具。
-
-请务必按照以下格式编写一个工具（包括**函数注释**，AstrBot 会尝试解析该函数注释）
-
-```py{3,4,5,6,7}
-@filter.llm_tool(name="get_weather") # 如果 name 不填，将使用函数名
-async def get_weather(self, event: AstrMessageEvent, location: str) -> MessageEventResult:
-    '''获取天气信息。
-
-    Args:
-        location(string): 地点
-    '''
-    resp = self.get_weather_from_api(location)
-    yield event.plain_result("天气信息: " + resp)
-```
-
-在 `location(string): 地点` 中，`location` 是参数名，`string` 是参数类型，`地点` 是参数描述。
-
-支持的参数类型有 `string`, `number`, `object`, `array`, `boolean`。
-
-> [!WARNING]
-> 请务必将注释格式写对！
-
-### 获取 AstrBot 配置
-
-```py
-config = self.context.get_config()
-# 使用方式类似 dict，如 config['provider']
-# config.save_config() 保存配置
-```
-
-### 获取当前载入的所有提供商
-
-```py
-providers = self.context.get_all_providers()
-providers_stt = self.context.get_all_stt_providers()
-providers_tts = self.context.get_all_tts_providers()
-```
-
-### 获取当前正在使用提供商
-
-```py
-provider = self.context.get_using_provider() # 没有使用时返回 None
-provider_stt = self.context.get_using_stt_provider() # 没有使用时返回 None
-provider_tts = self.context.get_using_tts_provider() # 没有使用时返回 None
-```
-
-### 通过提供商 ID 获取提供商
-
-```py
-self.context.get_provider_by_id(id_str)
-```
-
-### 获取当前载入的所有插件
-
-```py
-plugins = self.context.get_all_stars() # 返回 StarMetadata 包含了插件类实例、配置等等
-```
-
-### 获取函数调用管理器
-
-```py
-self.context.get_llm_tool_manager() # 返回 FuncCall
-
-# self.context.get_using_provider().text_chat(
-#     prompt="你好",
-#     session_id=None,
-#     contexts=[],
-#     image_urls=[],
-#     func_tool=self.context.get_llm_tool_manager(),
-#     system_prompt=""
-# )
-```
-
-### 注册一个异步任务
-
-直接在 **init**() 中使用 `asyncio.create_task()` 即可。
-
-```py
-import asyncio
-
-@register("task", "Soulter", "一个异步任务示例", "1.0.0")
-class TaskPlugin(Star):
-    def __init__(self, context: Context):
-        super().__init__(context)
-        asyncio.create_task(self.my_task())
-
-    async def my_task(self):
-        await asyncio.sleep(1)
-        print("Hello")
-```
-
-### 获取载入的所有人格(Persona)
-
-```py
-from astrbot.api.provider import Personality
-personas = self.context.provider_manager.personas # List[Personality]
-```
-
-### 获取默认人格
-
-```py
-self.context.provider_manager.selected_default_persona["name"] # 默认的 persona_id
-```
-
-### 获取会话正在使用的对话
-
-```py
-from astrbot.core.conversation_mgr import Conversation
-uid = event.unified_msg_origin
-curr_cid = await self.context.conversation_manager.get_curr_conversation_id(uid)
-conversation = await self.context.conversation_manager.get_conversation(uid, curr_cid) # Conversation
-# context = json.loads(conversation.history) # 获取上下文
-# persona_id = conversation.persona_id # 获取对话使用的人格
-```
-
-> 目前当用户新建一个对话时，`persona_id` 是 None，当用户使用 `/persona unset` 显式取消人格时，`persona_id` 会置为 `[%None]` 字符串（这是为了防止与 `persona_id` 为 None 时使用默认人格 冲突）。
->
-> 可以使用如下方法获得默认人格 `id`
->
-> ```py
-> if not conversation.persona_id and not conversation.persona_id == "[%None]":
->     curr_persona_name = self.context.provider_manager.selected_default_persona["name"] # 默认的 persona_id
-> ```
-
-### 获取会话的所有对话
-
-```py
-from astrbot.core.conversation_mgr import Conversation
-uid = event.unified_msg_origin
-conversations = await self.context.conversation_manager.get_conversations(uid) # List[Conversation]
-```
-
-### 获取加载的所有平台
-
-```py
-from astrbot.api.platform import Platform
-platforms = self.context.platform_manager.get_insts() # List[Platform]
-```
-
-## 平台适配器开发
+- `timeout` (float, optional): Screenshot timeout duration.
+- `type` (Literal["jpeg", "png"], optional): Screenshot image type.
+- `quality` (int, optional): Screenshot quality, only applicable to JPEG format images.
+- `omit_background` (bool, optional): Whether to hide the default white background, allowing transparent screenshots. Only applicable to PNG format.
+- `full_page` (bool, optional): Whether to capture the entire page rather than just the viewport size. Defaults to True.
+- `clip` (dict, optional): The region to crop after taking the screenshot. Refer to Playwright's screenshot API.
+- `animations`: (Literal["allow", "disabled"], optional): Whether to allow CSS animations to play.
+- `caret`: (Literal["hide", "initial"], optional): When set to hide, the text cursor will be hidden during the screenshot. Defaults to hide.
+- `scale`: (Literal["css", "device"], optional): Page scaling setting. When set to css, device resolution maps one-to-one with CSS pixels, which may result in smaller screenshots on high-DPI screens. When set to device, scaling is based on the device's screen scaling settings or the device_scale_factor parameter in the current Playwright Page/Context.
 
 ---
-outline: deep
+
+# Publishing Plugins to the Plugin Marketplace
+
+After completing your plugin development, you can choose to publish it to the AstrBot Plugin Marketplace, allowing more users to benefit from your work.
+
+AstrBot uses GitHub to host plugins, so you'll need to push your plugin code to the GitHub plugin repository you created earlier.
+
+You can submit your plugin by visiting the [AstrBot Plugin Marketplace](https://plugins.astrbot.app). Once on the website, click the `+` button in the bottom-right corner, fill in the basic information, author details, repository information, and other required fields. Then click the `Submit to GITHUB` button. You will be redirected to the AstrBot repository's Issue submission page. Please verify that all information is correct, then click the `Create` button to complete the plugin publication process.
+
+![fill out the form](https://files.astrbot.app/docs/source/images/plugin-publish/image.png)
+
+---
+
+# AstrBot Configuration File
+
+## data/cmd_config.json
+
+AstrBot's configuration file is a JSON format file. AstrBot reads this file at startup and initializes based on the settings within. Its path is `data/cmd_config.json`.
+
+> Since AstrBot v4.0.0, we introduced the concept of [multiple configuration files](https://blog.astrbot.app/posts/what-is-changed-in-4.0.0/#%E5%A4%9A%E9%85%8D%E7%BD%AE%E6%96%87%E4%BB%B6). `data/cmd_config.json` serves as the default configuration `default`. Other configuration files you create in the WebUI are stored in the `data/config/` directory, starting with `abconf_`.
+
+The default AstrBot configuration is as follows:
+
+```jsonc
+{
+    "config_version": 2,
+    "platform_settings": {
+        "unique_session": False,
+        "rate_limit": {
+            "time": 60,
+            "count": 30,
+            "strategy": "stall",  # stall, discard
+        },
+        "reply_prefix": "",
+        "forward_threshold": 1500,
+        "enable_id_white_list": True,
+        "id_whitelist": [],
+        "id_whitelist_log": True,
+        "wl_ignore_admin_on_group": True,
+        "wl_ignore_admin_on_friend": True,
+        "reply_with_mention": False,
+        "reply_with_quote": False,
+        "path_mapping": [],
+        "segmented_reply": {
+            "enable": False,
+            "only_llm_result": True,
+            "interval_method": "random",
+            "interval": "1.5,3.5",
+            "log_base": 2.6,
+            "words_count_threshold": 150,
+            "regex": ".*?[。？！~…]+|.+$",
+            "content_cleanup_rule": "",
+        },
+        "no_permission_reply": True,
+        "empty_mention_waiting": True,
+        "empty_mention_waiting_need_reply": True,
+        "friend_message_needs_wake_prefix": False,
+        "ignore_bot_self_message": False,
+        "ignore_at_all": False,
+    },
+    "provider": [],
+    "provider_settings": {
+        "enable": True,
+        "default_provider_id": "",
+        "default_image_caption_provider_id": "",
+        "image_caption_prompt": "Please describe the image using Chinese.",
+        "provider_pool": ["*"],  # "*" means use all available providers
+        "wake_prefix": "",
+        "web_search": False,
+        "websearch_provider": "default",
+        "websearch_tavily_key": [],
+        "web_search_link": False,
+        "display_reasoning_text": False,
+        "identifier": False,
+        "group_name_display": False,
+        "datetime_system_prompt": True,
+        "default_personality": "default",
+        "persona_pool": ["*"],
+        "prompt_prefix": "{{prompt}}",
+        "max_context_length": -1,
+        "dequeue_context_length": 1,
+        "streaming_response": False,
+        "show_tool_use_status": False,
+        "streaming_segmented": False,
+        "max_agent_step": 30,
+        "tool_call_timeout": 60,
+    },
+    "provider_stt_settings": {
+        "enable": False,
+        "provider_id": "",
+    },
+    "provider_tts_settings": {
+        "enable": False,
+        "provider_id": "",
+        "dual_output": False,
+        "use_file_service": False,
+    },
+    "provider_ltm_settings": {
+        "group_icl_enable": False,
+        "group_message_max_cnt": 300,
+        "image_caption": False,
+        "active_reply": {
+            "enable": False,
+            "method": "possibility_reply",
+            "possibility_reply": 0.1,
+            "whitelist": [],
+        },
+    },
+    "content_safety": {
+        "also_use_in_response": False,
+        "internal_keywords": {"enable": True, "extra_keywords": []},
+        "baidu_aip": {"enable": False, "app_id": "", "api_key": "", "secret_key": ""},
+    },
+    "admins_id": ["astrbot"],
+    "t2i": False,
+    "t2i_word_threshold": 150,
+    "t2i_strategy": "remote",
+    "t2i_endpoint": "",
+    "t2i_use_file_service": False,
+    "t2i_active_template": "base",
+    "http_proxy": "",
+    "no_proxy": ["localhost", "127.0.0.1", "::1"],
+    "dashboard": {
+        "enable": True,
+        "username": "astrbot",
+        "password": "77b90590a8945a7d36c963981a307dc9",
+        "jwt_secret": "",
+        "host": "0.0.0.0",
+        "port": 6185,
+    },
+    "platform": [],
+    "platform_specific": {
+        # Platform-specific settings: categorized by platform, then by feature group
+        "lark": {
+            "pre_ack_emoji": {"enable": False, "emojis": ["Typing"]},
+        },
+        "telegram": {
+            "pre_ack_emoji": {"enable": False, "emojis": ["✍️"]},
+        },
+    },
+    "wake_prefix": ["/"],
+    "log_level": "INFO",
+    "trace_enable": False,
+    "pip_install_arg": "",
+    "pypi_index_url": "https://mirrors.aliyun.com/pypi/simple/",
+    "persona": [],  # deprecated
+    "timezone": "Asia/Shanghai",
+    "callback_api_base": "",
+    "default_kb_collection": "",  # Default knowledge base name
+    "plugin_set": ["*"],  # "*" means use all available plugins, empty list means none
+}
+```
+
+## Field Details
+
+### `config_version`
+
+Configuration version, do not modify.
+
+### `platform_settings`
+
+General settings for message platform adapters.
+
+#### `platform_settings.unique_session`
+
+Whether to enable session isolation. Default is `false`. When enabled, each person's conversation context in groups or channels is independent.
+
+#### `platform_settings.rate_limit`
+
+Strategy when message rate exceeds limits. `time` is the window, `count` is the number of messages, and `strategy` is the limit strategy. `stall` means wait, `discard` means drop.
+
+#### `platform_settings.reply_prefix`
+
+Fixed prefix string when replying to messages. Default is empty.
+
+#### `platform_settings.forward_threshold`
+
+> Currently only applicable to the QQ platform adapter.
+
+Message forwarding threshold. When the reply content exceeds a certain number of characters, the bot will fold the message into a QQ group "forwarded message" to prevent spamming.
+
+#### `platform_settings.enable_id_white_list`
+
+Whether to enable the ID whitelist. Default is `true`. When enabled, only messages from IDs in the whitelist will be processed.
+
+#### `platform_settings.id_whitelist`
+
+ID whitelist. If filled, only message events from the specified IDs will be processed. Empty means the whitelist filter is not enabled. You can use the `/sid` command to get the session ID on a platform.
+
+Session IDs can also be found in AstrBot logs; when a message fails the whitelist, an INFO level log is output, e.g., `aiocqhttp:GroupMessage:547540978`.
+
+#### `platform_settings.id_whitelist_log`
+
+Whether to print logs for messages that fail the ID whitelist. Default is `true`.
+
+#### `platform_settings.wl_ignore_admin_on_group` & `platform_settings.wl_ignore_admin_on_friend`
+
+- `wl_ignore_admin_on_group`: Whether group messages from admins bypass the ID whitelist. Default is `true`.
+
+- `wl_ignore_admin_on_friend`: Whether private messages from admins bypass the ID whitelist. Default is `true`.
+
+#### `platform_settings.reply_with_mention`
+
+Whether to @ mention the user when replying. Default is `false`.
+
+#### `platform_settings.reply_with_quote`
+
+Whether to quote the user's message when replying. Default is `false`.
+
+#### `platform_settings.path_mapping`
+
+*This configuration item has been deprecated since v4.0.0.*
+
+List of path mappings. Used to replace file paths in messages. Each mapping item contains `from` and `to` fields, indicating that `from` in the message path is replaced with `to`.
+
+#### `platform_settings.segmented_reply`
+
+Segmented reply settings.
+
+- `enable`: Whether to enable segmented replies. Default is `false`.
+- `only_llm_result`: Whether to only segment replies generated by the LLM. Default is `true`.
+- `interval_method`: Method for segmentation intervals. Options are `random` and `log`. Default is `random`.
+- `interval`: Interval time for segmentation. For `random`, fill in two comma-separated numbers representing min and max intervals (seconds). For `log`, fill in one number representing the log base. Default is `"1.5,3.5"`.
+- `log_base`: Log base, only applicable when `interval_method` is `log`. Default is `2.6`.
+- `words_count_threshold`: Character limit for segmented replies. Only messages shorter than this value will be segmented; longer messages will be sent directly (unsegmented). Default is `150`.
+- `regex`: Used to split a message. By default, it splits based on punctuation like periods and question marks. `re.findall(r'<regex>', text)`. Default is `".*?[。？！~…]+|.+$"`.
+- `content_cleanup_rule`: Removes specified content from segments. Supports regex. For example, `[。？！]` will remove all periods, question marks, and exclamation points. `re.sub(r'<regex>', '', text)`.
+
+#### `platform_settings.no_permission_reply`
+
+Whether to reply with a "no permission" prompt when a user lacks authority. Default is `true`.
+
+#### `platform_settings.empty_mention_waiting`
+
+Whether to enable the empty @ waiting mechanism. Default is `true`. When enabled, if a user sends a message containing only an @ mention of the bot, the bot waits for the user to send the next message within 60 seconds and merges the two for processing. This is particularly useful on platforms that don't support sending @ and voice/images simultaneously.
+
+#### `platform_settings.empty_mention_waiting_need_reply`
+
+In the above item (`empty_mention_waiting`), if waiting is triggered, enabling this will make the bot immediately generate an LLM reply. Otherwise, it just waits without replying. Default is `true`.
+
+#### `platform_settings.friend_message_needs_wake_prefix`
+
+Whether private messages on platforms require a wake prefix. Default is `false`. When enabled, users must use a wake prefix to trigger a bot response in private chats.
+
+#### `platform_settings.ignore_bot_self_message`
+
+Whether to ignore messages sent by the bot itself. Default is `false`. When enabled, the bot won't process its own messages, preventing infinite loops on some platforms.
+
+#### `platform_settings.ignore_at_all`
+
+Whether to ignore @all messages. Default is `false`. When enabled, the bot won't respond to messages containing @all.
+
+### `provider`
+
+> This item only takes effect in `data/cmd_config.json`; AstrBot does not read this from configuration files in the `data/config/` directory.
+
+List of configured model service provider settings.
+
+### `provider_settings`
+
+General settings for LLM providers.
+
+#### `provider_settings.enable`
+
+Whether to enable LLM chat. Default is `true`.
+
+#### `provider_settings.default_provider_id`
+
+Default conversation model provider ID. Must be a provider ID already configured in the `provider` list. If empty, the first provider in the list is used.
+
+#### `provider_settings.default_image_caption_provider_id`
+
+Default image captioning model provider ID. Must be a provider ID already configured in the `provider` list. If empty, image captioning is disabled.
+
+This means when a user sends an image, AstrBot uses this provider to generate a text description, which is then used as part of the conversation context. This is useful when the conversation model doesn't support multimodal input.
+
+#### `provider_settings.image_caption_prompt`
+
+Prompt template for image captioning. Default is `"Please describe the image using Chinese."`.
+
+#### `provider_settings.provider_pool`
+
+*This configuration item is not yet in actual use.*
+
+#### `provider_settings.wake_prefix`
+
+Extra trigger condition for LLM chat. For example, if `chat` is filled, messages must start with `/chat` to trigger LLM chat, where `/` is the bot's wake prefix. This is a measure to prevent abuse.
+
+#### `provider_settings.web_search`
+
+Whether to enable AstrBot's built-in web search capability. Default is `false`. When enabled, the LLM may automatically search the web and answer based on the content.
+
+#### `provider_settings.websearch_provider`
+
+Web search provider type. Default is `default`. Currently supports `default` and `tavily`.
+
+- `default`: Works best when Google is accessible. If Google fails, it tries Bing and Sogou in order.
+
+- `tavily`: Uses the Tavily search engine.
+
+#### `provider_settings.websearch_tavily_key`
+
+API Key list for the Tavily search engine. Required when using `tavily` as the web search provider.
+
+#### `provider_settings.web_search_link`
+
+Whether to prompt the model to include links to search results in the reply. Default is `false`.
+
+#### `provider_settings.display_reasoning_text`
+
+Whether to display the model's reasoning process in the reply. Default is `false`.
+
+#### `provider_settings.identifier`
+
+Whether to prepend the group member's name to the prompt so the model better understands the group chat state. Default is `false`. Enabling this slightly increases token usage.
+
+#### `provider_settings.group_name_display`
+
+Whether to let the model know the name of the group it's in. Default is `false`. This currently only takes effect in the QQ platform adapter.
+
+#### `provider_settings.datetime_system_prompt`
+
+Whether to include the current machine date and time in the system prompt. Default is `true`.
+
+#### `provider_settings.default_personality`
+
+ID of the default personality to use. Configure personalities in the WebUI.
+
+#### `provider_settings.persona_pool`
+
+*This configuration item is not yet in actual use.*
+
+#### `provider_settings.prompt_prefix`
+
+User prompt. You can use `{{prompt}}` as a placeholder for user input. If no placeholder is provided, it's prepended to the user input.
+
+#### `provider_settings.max_context_length`
+
+When the conversation context exceeds this number, the oldest parts are discarded. One round of chat counts as 1. -1 means no limit.
+
+#### `provider_settings.dequeue_context_length`
+
+The number of conversation rounds to discard each time the `max_context_length` limit is triggered.
+
+#### `provider_settings.streaming_response`
+
+Whether to enable streaming responses. Default is `false`. When enabled, the model's reply is sent to the user in real-time with a typewriter effect. This only takes effect on WebChat, Telegram, and Lark platforms.
+
+#### `provider_settings.show_tool_use_status`
+
+Whether to show tool usage status. Default is `false`. When enabled, the model displays the tool name and input parameters when using a tool.
+
+#### `provider_settings.streaming_segmented`
+
+Whether platforms that don't support streaming responses should fall back to segmented replies. Default is `false`. This means if streaming is enabled but the platform doesn't support it, segmented multiple replies are used instead.
+
+#### `provider_settings.max_agent_step`
+
+Limit on the maximum number of Agent steps. Default is `30`. Each tool call by the model counts as one step.
+
+#### `provider_settings.tool_call_timeout`
+
+Added in `v4.3.5`
+
+Maximum timeout for tool calls (seconds), default is `60` seconds.
+
+#### `provider_stt_settings`
+
+General settings for Speech-to-Text (STT) providers.
+
+#### `provider_stt_settings.enable`
+
+Whether to enable STT services. Default is `false`.
+
+#### `provider_stt_settings.provider_id`
+
+STT provider ID. Must be an STT provider ID already configured in the `provider` list.
+
+#### `provider_tts_settings`
+
+General settings for Text-to-Speech (TTS) providers.
+
+#### `provider_tts_settings.enable`
+
+Whether to enable TTS services. Default is `false`.
+
+#### `provider_tts_settings.provider_id`
+
+TTS provider ID. Must be a TTS provider ID already configured in the `provider` list.
+
+#### `provider_tts_settings.dual_output`
+
+Whether to enable dual output. Default is `false`. When enabled, the bot sends both text and voice messages.
+
+#### `provider_tts_settings.use_file_service`
+
+Whether to enable the file service. Default is `false`. When enabled, the bot provides the output voice file as an external HTTP link to the message platform. This depends on the `callback_api_base` configuration.
+
+#### `provider_ltm_settings`
+
+General settings for group chat context awareness providers.
+
+#### `provider_ltm_settings.group_icl_enable`
+
+Whether to enable group chat context awareness. Default is `false`. When enabled, the bot records group chat conversations to better understand context.
+
+The context content is placed in the conversation's system prompt.
+
+#### `provider_ltm_settings.group_message_max_cnt`
+
+Maximum number of group chat messages to record. Default is `100`. Messages exceeding this count are discarded.
+
+#### `provider_ltm_settings.image_caption`
+
+Whether to record images in group chats and automatically generate text descriptions using an image captioning model. Default is `false`. This depends on the `provider_settings.default_image_caption_provider_id` configuration. Use with caution as it can significantly increase API calls and token usage.
+
+#### `provider_ltm_settings.active_reply`
+
+- `enable`: Whether to enable active replies. Default is `false`.
+- `method`: Method for active replies. Option is `possibility_reply`.
+- `possibility_reply`: Probability of an active reply. Default is `0.1`. Only applicable when `method` is `possibility_reply`.
+- `whitelist`: ID whitelist for active replies. Only IDs in this list will trigger active replies. Empty means no whitelist filter. You can use the `/sid` command to get the session ID on a platform.
+
+### `content_safety`
+
+Content safety settings.
+
+#### `content_safety.also_use_in_response`
+
+Whether to also perform content safety checks on LLM replies. Default is `false`. When enabled, bot-generated replies also undergo safety checks to prevent inappropriate content.
+
+#### `content_safety.internal_keywords`
+
+Internal keyword detection settings.
+
+- `enable`: Whether to enable internal keyword detection. Default is `true`.
+- `extra_keywords`: List of extra keywords, supports regex. Default is empty.
+
+#### `content_safety.baidu_aip`
+
+Baidu AI content moderation settings.
+
+- `enable`: Whether to enable Baidu AI content moderation. Default is `false`.
+- `app_id`: App ID for Baidu AI content moderation.
+- `api_key`: API Key for Baidu AI content moderation.
+- `secret_key`: Secret Key for Baidu AI content moderation.
+
+> [!TIP]
+> To enable Baidu AI content moderation, please `pip install baidu-aip` first.
+
+### `admins_id`
+
+List of administrator IDs. Additionally, you can use `/op` and `/deop` commands to add or remove admins.
+
+### `t2i`
+
+Whether to enable Text-to-Image (T2I) functionality. Default is `false`. When enabled, if a user's message exceeds a certain character count, the bot renders the message as an image to improve readability and prevent spamming. Supports Markdown rendering.
+
+### `t2i_word_threshold`
+
+Character threshold for T2I. Default is `150`. When a message exceeds this count, the bot renders it as an image.
+
+### `t2i_strategy`
+
+Rendering strategy for T2I. Options are `local` and `remote`. Default is `remote`.
+
+- `local`: Uses AstrBot's local T2I service for rendering. Lower quality but doesn't depend on external services.
+- `remote`: Uses a remote T2I service for rendering. Uses the official AstrBot service by default, which offers better quality.
+
+### `t2i_endpoint`
+
+AstrBot API address. Used for rendering Markdown images. Effective when `t2i_strategy` is `remote`. Default is empty, meaning the official AstrBot service is used.
+
+### `t2i_use_file_service`
+
+Whether to enable the file service. Default is `false`. When enabled, the bot provides the rendered image as an external HTTP link to the message platform. This depends on the `callback_api_base` configuration.
+
+### `http_proxy`
+
+HTTP proxy. E.g., `http://localhost:7890`.
+
+### `no_proxy`
+
+List of addresses that bypass the proxy. E.g., `["localhost", "127.0.0.1"]`.
+
+### `dashboard`
+
+AstrBot WebUI configuration.
+
+Please do not change the `password` value arbitrarily. It is an `md5` encoded password. Change the password in the control panel.
+
+- `enable`: Whether to enable the AstrBot WebUI. Default is `true`.
+- `username`: Username for the AstrBot WebUI. Default is `astrbot`.
+- `password`: Password for the AstrBot WebUI. Default is the `md5` encoded value of `astrbot`. Do not modify directly unless you know what you are doing.
+- `jwt_secret`: JWT secret key. AstrBot generates this randomly at initialization. Do not modify unless you know what you are doing.
+- `host`: Address the AstrBot WebUI listens on. Default is `0.0.0.0`.
+- `port`: Port the AstrBot WebUI listens on. Default is `6185`.
+
+### `platform`
+
+> This item only takes effect in `data/cmd_config.json`; AstrBot does not read this from configuration files in the `data/config/` directory.
+
+List of configured AstrBot message platform adapter settings.
+
+### `platform_specific`
+
+Platform-specific settings. Categorized by platform, then by feature group.
+
+#### `platform_specific.<platform>.pre_ack_emoji`
+
+When enabled, AstrBot sends a pre-reply emoji before requesting the LLM to inform the user that the request is being processed. This currently only takes effect in the Lark and Telegram platform adapters.
+
+##### lark
+
+- `enable`: Whether to enable pre-reply emojis for Lark messages. Default is `false`.
+- `emojis`: List of pre-reply emojis. Default is `["Typing"]`. Refer to [Emoji Documentation](https://open.feishu.cn/document/server-docs/im-v1/message-reaction/emojis-introduce) for emoji names.
+
+##### telegram
+
+- `enable`: Whether to enable pre-reply emojis for Telegram messages. Default is `false`.
+- `emojis`: List of pre-reply emojis. Default is `["✍️"]`. Telegram only supports a fixed set of reactions; refer to [reactions.txt](https://gist.github.com/Soulter/3f22c8e5f9c7e152e967e8bc28c97fc9).
+
+### `wake_prefix`
+
+Wake prefix. Default is `/`. When a message starts with `/`, AstrBot is awakened.
+
+> [!TIP]
+> If the awakened session is not in the ID whitelist, AstrBot will not respond.
+
+### `log_level`
+
+Log level. Default is `INFO`. Can be set to `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.
+
+### `trace_enable`
+
+Whether to enable trace recording. Default is `false`. When enabled, AstrBot records execution traces, which can be viewed on the Trace page of the admin panel.
+
+### `pip_install_arg`
+
+Arguments for `pip install`. E.g., `-i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple`.
+
+### `pypi_index_url`
+
+PyPI index URL. Default is `https://mirrors.aliyun.com/pypi/simple/`.
+
+### `persona`
+
+*This configuration item has been deprecated since v4.0.0. Please use the WebUI to configure personalities.*
+
+List of configured personalities. Each personality contains `id`, `name`, `description`, and `system_prompt` fields.
+
+### `timezone`
+
+Timezone setting. Please fill in an IANA timezone name, such as Asia/Shanghai. If empty, the system default timezone is used. See all timezones at: [IANA Time Zone Database](https://data.iana.org/time-zones/tzdb-2021a/zone1970.tab).
+
+### `callback_api_base`
+
+Base address for the AstrBot API. Used for file services, plugin callbacks, etc. E.g., `http://example.com:6185`. Default is empty, meaning file services and plugin callbacks are disabled.
+
+### `default_kb_collection`
+
+Default knowledge base name. Used for RAG. If empty, no knowledge base is used.
+
+### `plugin_set`
+
+List of enabled plugins. `*` means all available plugins are enabled. Default is `["*"]`.
+
+---
+
+# AstrBot HTTP API
+
+Starting from v4.18.0, AstrBot provides API Key based HTTP APIs for programmatic access.
+
+## Quick Start
+
+1. Create an API key in WebUI - Settings.
+2. Include the API key in request headers:
+
+```http
+Authorization: Bearer abk_xxx
+```
+
+Also supported:
+
+```http
+X-API-Key: abk_xxx
+```
+
+3. For chat endpoints, `username` is required:
+
+- `POST /api/v1/chat`: request body must include `username`
+- `GET /api/v1/chat/sessions`: query params must include `username`
+
+## Common Endpoints
+
+- `POST /api/v1/chat`: send chat message (SSE stream, server generates UUID when `session_id` is omitted)
+- `GET /api/v1/chat/sessions`: list sessions for a specific `username` with pagination
+- `GET /api/v1/configs`: list available config files
+- `POST /api/v1/file`: upload attachment
+- `POST /api/v1/im/message`: proactive message via UMO
+- `GET /api/v1/im/bots`: list bot/platform IDs
+
+## Example
+
+```bash
+curl -N 'http://localhost:6185/api/v1/chat' \
+  -H 'Authorization: Bearer abk_xxx' \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"Hello","username":"alice"}'
+```
+
+## Full API Reference
+
+Use the interactive docs:
+
+- https://docs.astrbot.app/scalar.html
+
 ---
 
 # 开发一个平台适配器
@@ -1273,8 +2373,8 @@ class FakePlatformEvent(AstrMessageEvent):
 最后，main.py 只需这样，在初始化的时候导入 fake_platform_adapter 模块。装饰器会自动注册。
 
 ```py
-from astrbot.api.star import Context, Star, register
-@register("helloworld", "Your Name", "一个简单的 Hello World 插件", "1.0.0")
+from astrbot.api.star import Context, Star
+
 class MyPlugin(Star):
     def __init__(self, context: Context):
         from .fake_platform_adapter import FakePlatformAdapter # noqa
@@ -1282,12 +2382,15 @@ class MyPlugin(Star):
 
 搞好后，运行 AstrBot：
 
-![](../source/images/plugin-platform-adapter/QQ_1738155926221.png)
+![image](https://files.astrbot.app/docs/source/images/plugin-platform-adapter/QQ_1738155926221.png)
 
 这里出现了我们创建的 fake。
 
-![](../source/images/plugin-platform-adapter/QQ_1738155982211.png)
+![image](https://files.astrbot.app/docs/source/images/plugin-platform-adapter/QQ_1738155982211.png)
 
 启动后，可以看到正常工作：
 
-![](../source/images/plugin-platform-adapter/QQ_1738156166893.png)
+![image](https://files.astrbot.app/docs/source/images/plugin-platform-adapter/QQ_1738156166893.png)
+
+
+有任何疑问欢迎加群询问~
