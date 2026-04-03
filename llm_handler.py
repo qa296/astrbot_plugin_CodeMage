@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional, List
 from astrbot.api import logger
 from astrbot.api.star import Context
 from astrbot.api import AstrBotConfig
-from .utils import extract_code_blocks, parse_json_response
+from .utils import extract_code_blocks, parse_json_response, extract_codemage_block
 
 
 class LLMHandler:
@@ -168,7 +168,7 @@ class LLMHandler:
         system_prompt = f"""你是一个专业的AstrBot插件规划助手。请根据用户描述先生成插件的元数据信息，不要生成Markdown文档。
 
 请严格遵守以下要求：
-1. 输出必须是JSON，并放在```json和```之间
+1. 输出必须是JSON，并放在<codemage:json>和</codemage:json>之间
 2. JSON需要包含以下字段：
    - name: string，插件名称，格式为 astrbot_plugin_xxx
    - author: string
@@ -186,9 +186,9 @@ class LLMHandler:
 
         prompt = f"根据以下描述生成AstrBot插件的元数据：\n\n{description}"
         response = await self.call_llm(prompt, system_prompt)
-        json_blocks = extract_code_blocks(response)
-        if json_blocks:
-            metadata = parse_json_response(json_blocks[0])
+        json_content = extract_codemage_block(response, "json")
+        if json_content:
+            metadata = parse_json_response(json_content)
             if metadata:
                 return metadata
         
@@ -214,7 +214,7 @@ class LLMHandler:
         system_prompt = f"""你是一个专业的AstrBot插件技术作家。请根据插件元数据生成详细的Markdown文档。
 
 请严格遵守以下要求：
-1. 输出必须放在`````和```之间
+1. 输出必须放在<codemage:markdown>和</codemage:markdown>之间
 2. 文档需要包含以下章节：
    - 插件简介
    - 功能说明
@@ -230,9 +230,9 @@ class LLMHandler:
 
         prompt = f"根据以下插件信息生成Markdown文档：\n\n元数据：\n{metadata_str}\n\n用户描述：\n{description}"
         response = await self.call_llm(prompt, system_prompt)
-        markdown_blocks = extract_code_blocks(response)
-        if markdown_blocks:
-            return markdown_blocks[0]
+        markdown_content = extract_codemage_block(response, "markdown")
+        if markdown_content:
+            return markdown_content
         
         raise ValueError("无法从LLM响应中提取插件Markdown文档")
         
@@ -249,9 +249,9 @@ class LLMHandler:
         """
         system_prompt = f"""你是一个专业的AstrBot插件开发助手。请根据用户反馈优化插件的元数据和Markdown文档。
 
-请按照以下格式返回，包含在```json和```之间：
+请按照以下格式返回，包含在<codemage:json>和</codemage:json>之间：
 
-```json
+<codemage:json>
 {{
   "name": "插件名称",
   "author": "作者名称",
@@ -263,7 +263,7 @@ class LLMHandler:
   }},
   "markdown": "# 插件名称\\n\\n## 插件简介\\n\\n插件功能简要介绍\\n\\n## 功能说明\\n\\n插件提供的具体功能\\n\\n## 插件流程\\n\\n详细说明插件的工作流程和内部逻辑，包括各种情况下的处理过程\\n\\n## 使用方法\\n\\n详细说明如何使用插件的各项功能，包括命令使用示例等\\n\\n## 配置说明\\n\\n插件配置项说明\\n\\n## 注意事项\\n\\n使用插件需要注意的事项和限制"
 }}
-```
+</codemage:json>
 
 要求：
 1. 根据用户反馈进行针对性优化
@@ -279,9 +279,8 @@ class LLMHandler:
         response = await self.call_llm(prompt, system_prompt)
         
         # 解析JSON响应
-        json_match = extract_code_blocks(response)
-        if json_match:
-            json_content = json_match[0]
+        json_content = extract_codemage_block(response, "json")
+        if json_content:
             result = parse_json_response(json_content)
             if result:
                 return result
@@ -321,7 +320,7 @@ class LLMHandler:
 {config_schema}
 ```
 
-请直接返回Python代码，包含在``python和```之间。"""
+请直接返回Python代码，包含在<codemage:python>和</codemage:python>之间。"""
 
         metadata_str = json.dumps(metadata, ensure_ascii=False, indent=2)
         prompt = f"请根据以下插件元数据和Markdown文档生成插件代码：\n\n元数据：\n{metadata_str}\n\n文档：\n{markdown}"
@@ -329,9 +328,9 @@ class LLMHandler:
         response = await self.call_llm(prompt, system_prompt)
         
         # 提取代码块
-        code_blocks = extract_code_blocks(response)
-        if code_blocks:
-            return code_blocks[0]
+        code_content = extract_codemage_block(response, "python")
+        if code_content:
+            return code_content
             
         raise ValueError("无法从LLM响应中提取插件代码")
         
@@ -541,7 +540,7 @@ class LLMHandler:
 3. 保持原有功能不变
 4. 确保修复后的代码符合反向提示词要求：{self.negative_prompt}
 
-请直接返回修复后的Python代码，包含在``python和```之间。"""
+请直接返回修复后的Python代码，包含在<codemage:python>和</codemage:python>之间。"""
 
         issues_str = "\n".join([f"- {issue}" for issue in issues])
         suggestions_str = "\n".join([f"- {suggestion}" for suggestion in suggestions])
@@ -552,13 +551,13 @@ class LLMHandler:
                 response = await self.call_llm(prompt, system_prompt)
                 
                 # 提取代码块
-                code_blocks = extract_code_blocks(response)
-                if code_blocks:
-                    return code_blocks[0]
+                code_content = extract_codemage_block(response, "python")
+                if code_content:
+                    return code_content
                     
                 # 如果不是最后一次尝试，修改提示词要求更明确的格式
                 if attempt < max_retries - 1:
-                    prompt += "\n\n重要：请确保返回的代码包含在```python和```之间，不要包含其他内容。"
+                    prompt += "\n\n重要：请确保返回的代码包含在<codemage:python>和</codemage:python>之间，不要包含其他内容。"
                     
             except Exception as e:
                 logger.error(f"修复插件代码失败（尝试 {attempt + 1}/{max_retries}）：{str(e)}")
@@ -583,7 +582,7 @@ class LLMHandler:
         system_prompt = f"""你是一个专业的AstrBot插件配置设计助手。请根据插件元数据和功能描述生成插件的配置文件(_conf_schema.json)。
         
 请严格遵守以下要求：
-1. 输出必须是JSON格式，并放在```json和```之间
+1. 输出必须是JSON格式，并放在<codemage:json>和</codemage:json>之间
 2. 配置文件需要包含插件可能需要的配置项
 3. 根据插件功能智能推断合适的配置项类型和默认值
 4. 配置项应该包含description、type、hint、default等字段
@@ -594,7 +593,7 @@ class LLMHandler:
 {dev_docs}...
 
 请按照以下格式返回：
-```json
+<codemage:json>
 {{
   "配置项名": {{
     "description": "配置项描述",
@@ -608,7 +607,7 @@ class LLMHandler:
     "editor_theme": "vs-light"
   }}
 }}
-```
+</codemage:json>
 
 要求：
 1. 根据插件功能智能推断需要的配置项
@@ -623,13 +622,12 @@ class LLMHandler:
         response = await self.call_llm(prompt, system_prompt)
         
         # 解析JSON响应
-        json_blocks = extract_code_blocks(response)
-        if json_blocks:
-            config_content = json_blocks[0]
+        json_content = extract_codemage_block(response, "json")
+        if json_content:
             # 验证是否为有效JSON
             try:
-                parsed_config = json.loads(config_content)
-                return config_content
+                parsed_config = json.loads(json_content)
+                return json_content
             except json.JSONDecodeError:
                 self.logger.warning("LLM返回的配置文件JSON格式不正确，尝试提取")
                 # 尝试从响应中提取JSON
@@ -674,16 +672,16 @@ class LLMHandler:
 
 用户反馈：{feedback}
 
-请直接返回修改后的JSON配置文件内容，包含在```json和```之间。"""
+请直接返回修改后的JSON配置文件内容，包含在<codemage:json>和</codemage:json>之间。"""
 
         prompt = f"请根据用户反馈修改以下插件配置文件：\n\n当前配置：\n{current_config}\n\n插件元数据：\n{json.dumps(metadata, ensure_ascii=False, indent=2)}\n\n用户反馈：\n{feedback}"
         
         response = await self.call_llm(prompt, system_prompt)
         
         # 解析JSON响应
-        json_blocks = extract_code_blocks(response)
-        if json_blocks:
-            return json_blocks[0]
+        json_content = extract_codemage_block(response, "json")
+        if json_content:
+            return json_content
         
         raise ValueError("无法修改插件配置文件")
     
@@ -719,16 +717,16 @@ class LLMHandler:
 
 用户反馈：{feedback}
 
-请直接返回修改后的Markdown文档内容，包含在`````和```之间。"""
+请直接返回修改后的Markdown文档内容，包含在<codemage:markdown>和</codemage:markdown>之间。"""
 
         prompt = f"请根据用户反馈修改以下插件Markdown文档：\n\n当前文档：\n{current_markdown}\n\n插件元数据：\n{json.dumps(metadata, ensure_ascii=False, indent=2)}\n\n用户反馈：\n{feedback}"
         
         response = await self.call_llm(prompt, system_prompt)
         
         # 提取Markdown内容
-        markdown_blocks = extract_code_blocks(response)
-        if markdown_blocks:
-            return markdown_blocks[0]
+        markdown_content = extract_codemage_block(response, "markdown")
+        if markdown_content:
+            return markdown_content
         
         raise ValueError("无法修改插件Markdown文档")
     
@@ -758,8 +756,8 @@ class LLMHandler:
 
 用户反馈：{feedback}
 
-请按照以下格式返回修改后的元数据，包含在```json和```之间：
-```json
+请按照以下格式返回修改后的元数据，包含在<codemage:json>和</codemage:json>之间：
+<codemage:json>
 {{
   "name": "插件名称",
   "author": "作者名称",
@@ -777,7 +775,7 @@ class LLMHandler:
     "dependencies": ["依赖1", "依赖2"]
   }}
 }}
-```
+</codemage:json>
 
 要求：
 1. 根据用户反馈进行针对性修改
@@ -790,9 +788,8 @@ class LLMHandler:
         response = await self.call_llm(prompt, system_prompt)
         
         # 解析JSON响应
-        json_blocks = extract_code_blocks(response)
-        if json_blocks:
-            json_content = json_blocks[0]
+        json_content = extract_codemage_block(response, "json")
+        if json_content:
             result = parse_json_response(json_content)
             if result:
                 return result

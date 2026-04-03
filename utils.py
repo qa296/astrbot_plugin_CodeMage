@@ -202,6 +202,23 @@ def format_time(timestamp: float) -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(timestamp))
 
 
+def extract_codemage_block(text: str, tag_name: str) -> Optional[str]:
+    """提取 <codemage:tag>...</codemage:tag> 包裹的内容
+    
+    使用带命名空间的 XML 标签包裹内容，避免与内容中可能出现的 ```` ``` ```` 或其他标记冲突。
+    
+    Args:
+        text: 包含 codemage 标签的文本
+        tag_name: 标签名，如 'json', 'python', 'markdown'
+        
+    Returns:
+        Optional[str]: 提取的内容，失败返回 None
+    """
+    pattern = rf'<codemage:{tag_name}>(.*?)</codemage:{tag_name}>'
+    match = re.search(pattern, text, re.DOTALL)
+    return match.group(1).strip() if match else None
+
+
 def escape_markdown(text: str) -> str:
     """转义Markdown特殊字符
     
