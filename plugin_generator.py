@@ -1,31 +1,32 @@
-'''
+"""
 CodeMage插件生成器模块
 负责协调整个插件生成流程
-'''
+"""
 
-import os
 import json
+import os
 import time
-import asyncio
-from typing import Dict, Any, Optional, List
-from astrbot.api import logger
-from astrbot.api.star import Context, Star
-from astrbot.api import AstrBotConfig
-from astrbot.api.event import AstrMessageEvent
+from typing import Any
 
-from .llm_handler import LLMHandler
+from astrbot.api import AstrBotConfig, logger
+from astrbot.api.event import AstrMessageEvent
+from astrbot.api.star import Context, Star
+
 from .directory_detector import DirectoryDetector
-from .utils import (
-    sanitize_plugin_name, 
-    create_plugin_directory,
-    format_time
-)
+from .llm_handler import LLMHandler
+from .utils import create_plugin_directory, format_time, sanitize_plugin_name
 
 
 class PluginGenerator:
-    '''插件生成器类'''
-    
-    def __init__(self, context: Context, config: AstrBotConfig, installer=None, star: Optional[Star] = None):
+    """插件生成器类"""
+
+    def __init__(
+        self,
+        context: Context,
+        config: AstrBotConfig,
+        installer=None,
+        star: Star | None = None,
+    ):
         self.context = context
         self.config = config
         self.llm_handler = LLMHandler(context, config)
@@ -33,7 +34,7 @@ class PluginGenerator:
         self.installer = installer
         self.logger = logger
         self.star = star
-        
+
         # 生成状态
         self.generation_status = {
             "is_generating": False,
@@ -48,10 +49,10 @@ class PluginGenerator:
                 "生成配置文件",
                 "生成插件代码",
                 "代码审查与修复",
-                "打包并安装插件"
-            ]
+                "打包并安装插件",
+            ],
         }
-        
+
         # 待确认的插件生成任务
         self.pending_generation = {
             "active": False,
@@ -63,7 +64,7 @@ class PluginGenerator:
             "umo": "",
             "timestamp": "",
             "awaiting_confirmation": False,
-            "modification_history": []
+            "modification_history": [],
         }
 
         # 初始化时尝试加载持久化的待确认任务
@@ -71,17 +72,17 @@ class PluginGenerator:
             self._load_pending_state()
         except Exception:
             pass
-        
-    def get_current_status(self) -> Dict[str, Any]:
-        '''获取当前生成状态
+
+    def get_current_status(self) -> dict[str, Any]:
+        """获取当前生成状态
 
         Returns:
             Dict[str, Any]: 当前状态
-        '''
+        """
         return self.generation_status.copy()
 
     # ---- 待确认任务持久化 ----
-    def _get_state_dir(self) -> Optional[str]:
+    def _get_state_dir(self) -> str | None:
         """获取状态文件目录(data/codemage)，若不存在则尝试创建"""
         data_dir = self.directory_detector.get_data_directory()
         if not data_dir:
@@ -93,7 +94,7 @@ class PluginGenerator:
             pass
         return state_dir
 
-    def _get_state_file_path(self) -> Optional[str]:
+    def _get_state_file_path(self) -> str | None:
         """获取持久化状态文件路径"""
         state_dir = self._get_state_dir()
         if not state_dir:
@@ -115,8 +116,12 @@ class PluginGenerator:
                 "description": self.pending_generation.get("description", ""),
                 "umo": self.pending_generation.get("umo", ""),
                 "timestamp": self.pending_generation.get("timestamp", ""),
-                "awaiting_confirmation": self.pending_generation.get("awaiting_confirmation", False),
-                "modification_history": self.pending_generation.get("modification_history", []),
+                "awaiting_confirmation": self.pending_generation.get(
+                    "awaiting_confirmation", False
+                ),
+                "modification_history": self.pending_generation.get(
+                    "modification_history", []
+                ),
             }
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -129,20 +134,22 @@ class PluginGenerator:
             path = self._get_state_file_path()
             if not path or not os.path.exists(path):
                 return
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             # 合并状态
-            self.pending_generation.update({
-                "active": data.get("active", False),
-                "metadata": data.get("metadata", {}),
-                "markdown": data.get("markdown", ""),
-                "config_schema": data.get("config_schema", ""),
-                "description": data.get("description", ""),
-                "umo": data.get("umo", ""),
-                "timestamp": data.get("timestamp", ""),
-                "awaiting_confirmation": data.get("awaiting_confirmation", False),
-                "modification_history": data.get("modification_history", []),
-            })
+            self.pending_generation.update(
+                {
+                    "active": data.get("active", False),
+                    "metadata": data.get("metadata", {}),
+                    "markdown": data.get("markdown", ""),
+                    "config_schema": data.get("config_schema", ""),
+                    "description": data.get("description", ""),
+                    "umo": data.get("umo", ""),
+                    "timestamp": data.get("timestamp", ""),
+                    "awaiting_confirmation": data.get("awaiting_confirmation", False),
+                    "modification_history": data.get("modification_history", []),
+                }
+            )
         except Exception as e:
             self.logger.warning(f"加载待确认状态失败: {str(e)}")
 
@@ -156,19 +163,21 @@ class PluginGenerator:
             self.logger.warning(f"删除待确认状态文件失败: {str(e)}")
 
     def _update_status(self, step: int, plugin_name: str = ""):
-        '''更新生成状态
+        """更新生成状态
 
         Args:
             step: 当前步骤
             plugin_name: 插件名称
-        '''
+        """
         self.generation_status["current_step"] = step
-        self.generation_status["progress_percentage"] = int((step / self.generation_status["total_steps"]) * 100)
+        self.generation_status["progress_percentage"] = int(
+            (step / self.generation_status["total_steps"]) * 100
+        )
         if plugin_name:
             self.generation_status["plugin_name"] = plugin_name
 
     def _build_step_message(self) -> str:
-        '''构建当前步骤提示信息'''
+        """构建当前步骤提示信息"""
         current_step = self.generation_status.get("current_step", 0)
         total_steps = self.generation_status.get("total_steps", 0)
         if not current_step:
@@ -178,33 +187,40 @@ class PluginGenerator:
         description = descriptions[index] if descriptions else ""
         return f"步骤{current_step}/{total_steps}：{description}"
 
-    def _build_preview_text(self, meta: Dict[str, Any], markdown: str, config_schema: str) -> str:
-        '''构建插件方案预览文本（不截断，不添加省略号）'''
+    def _build_preview_text(
+        self, meta: dict[str, Any], markdown: str, config_schema: str
+    ) -> str:
+        """构建插件方案预览文本（不截断，不添加省略号）"""
         lines = [
             f"插件名称：{meta.get('name', '未知')}",
             f"作者：{meta.get('author', '未知')}",
             f"描述：{meta.get('description', '无描述')}",
-            f"版本：{meta.get('version', '1.0.0')}"
+            f"版本：{meta.get('version', '1.0.0')}",
         ]
         commands = meta.get("commands", [])
         if isinstance(commands, list) and commands:
             lines.append("指令预览：")
             for cmd in commands[:5]:
                 if isinstance(cmd, dict):
-                    cmd_name = cmd.get("command") or cmd.get("name") or cmd.get("title") or "未知指令"
+                    cmd_name = (
+                        cmd.get("command")
+                        or cmd.get("name")
+                        or cmd.get("title")
+                        or "未知指令"
+                    )
                     cmd_desc = cmd.get("description") or cmd.get("desc") or ""
                     lines.append(f"  - {cmd_name}: {cmd_desc}")
                 else:
                     lines.append(f"  - {cmd}")
         # 文档和配置均以图片形式发送，避免文本被截断
-        if (markdown or '').strip():
+        if (markdown or "").strip():
             lines.append("文档：已转换为图片发送")
-        if (config_schema or '').strip():
+        if (config_schema or "").strip():
             lines.append("配置：已转换为图片发送")
         return "\n".join(lines)
 
     def _normalize_config_schema(self, config_schema: str) -> str:
-        '''规范化配置文件内容'''
+        """规范化配置文件内容"""
         if not config_schema or not config_schema.strip():
             return ""
         try:
@@ -213,7 +229,7 @@ class PluginGenerator:
         except json.JSONDecodeError:
             return config_schema
 
-    def _format_default_value(self, item_schema: Dict[str, Any]) -> str:
+    def _format_default_value(self, item_schema: dict[str, Any]) -> str:
         """将默认值格式化为可读字符串（布尔值显示为[x]/[ ]）"""
         default = item_schema.get("default", None)
         t = (item_schema.get("type") or "").lower()
@@ -237,17 +253,19 @@ class PluginGenerator:
         except Exception:
             return str(default)
 
-    def _build_config_rows(self, schema: Dict[str, Any]) -> List[Dict[str, str]]:
+    def _build_config_rows(self, schema: dict[str, Any]) -> list[dict[str, str]]:
         """从 _conf_schema.json 的 schema 构建人类可读的表格行"""
-        rows: List[Dict[str, str]] = []
+        rows: list[dict[str, str]] = []
 
-        def walk(item_key: str, item: Dict[str, Any], parent_label: Optional[str] = None):
+        def walk(
+            item_key: str, item: dict[str, Any], parent_label: str | None = None
+        ):
             desc = item.get("description") or item_key
             name_label = f"{parent_label} > {desc}" if parent_label else desc
             hint = item.get("hint")
             t = item.get("type", "")
             options = item.get("options")
-            detail_parts: List[str] = []
+            detail_parts: list[str] = []
             if desc:
                 detail_parts.append(str(desc))
             if hint:
@@ -261,11 +279,13 @@ class PluginGenerator:
                     opts = str(options)
                 detail_parts.append(f"可选项: {opts}")
             default_str = self._format_default_value(item)
-            rows.append({
-                "name": name_label,
-                "detail": "\n".join(detail_parts) if detail_parts else "",
-                "default": default_str
-            })
+            rows.append(
+                {
+                    "name": name_label,
+                    "detail": "\n".join(detail_parts) if detail_parts else "",
+                    "default": default_str,
+                }
+            )
             if (item.get("type") == "object") and isinstance(item.get("items"), dict):
                 for sub_key, sub_item in item.get("items").items():
                     if isinstance(sub_item, dict):
@@ -277,7 +297,13 @@ class PluginGenerator:
                 walk(key, item, parent_label=None)
         return rows
 
-    async def _send_doc_and_config_images(self, event: AstrMessageEvent, metadata: Dict[str, Any], markdown: str, config_schema: str):
+    async def _send_doc_and_config_images(
+        self,
+        event: AstrMessageEvent,
+        metadata: dict[str, Any],
+        markdown: str,
+        config_schema: str,
+    ):
         """使用 AstrBot 的 t2i 将文档与配置以图片形式发送，并将配置转成可读表格"""
         if not self.star:
             return
@@ -285,19 +311,23 @@ class PluginGenerator:
         doc_text = (markdown or "").strip()
         if doc_text:
             try:
-                DOC_TMPL = '''
+                DOC_TMPL = """
 <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; font-size: 14px; color: #222; padding: 16px;">
   <h2 style="margin:0 0 12px;">{{ title }}</h2>
   <div style="white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; line-height: 1.6;">{{ content }}</div>
 </div>
-'''
+"""
                 title = f"{metadata.get('name', '插件')} 文档"
-                url = await self.star.html_render(DOC_TMPL, {"title": title, "content": doc_text})
+                url = await self.star.html_render(
+                    DOC_TMPL, {"title": title, "content": doc_text}
+                )
                 await event.send(event.image_result(url))
-            except Exception as e:
+            except Exception:
                 # 回退到简单的文本转图
                 try:
-                    url = await self.star.text_to_image(f"{metadata.get('name', '插件')} 文档\n\n{doc_text}")
+                    url = await self.star.text_to_image(
+                        f"{metadata.get('name', '插件')} 文档\n\n{doc_text}"
+                    )
                     await event.send(event.image_result(url))
                 except Exception:
                     await event.send(event.plain_result(doc_text[:1800]))
@@ -311,7 +341,7 @@ class PluginGenerator:
             if isinstance(schema_obj, dict):
                 rows = self._build_config_rows(schema_obj)
                 try:
-                    CONFIG_TMPL = '''
+                    CONFIG_TMPL = """
 <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; font-size: 14px; color: #222; padding: 16px;">
   <h2 style="margin:0 0 12px;">{{ title }}</h2>
   <table style="border-collapse: collapse; width: 100%; table-layout: fixed;">
@@ -333,11 +363,13 @@ class PluginGenerator:
     </tbody>
   </table>
 </div>
-'''
+"""
                     title = f"{metadata.get('name', '插件')} 配置"
-                    url = await self.star.html_render(CONFIG_TMPL, {"title": title, "rows": rows})
+                    url = await self.star.html_render(
+                        CONFIG_TMPL, {"title": title, "rows": rows}
+                    )
                     await event.send(event.image_result(url))
-                except Exception as e:
+                except Exception:
                     # 回退到文本转图
                     try:
                         lines = ["选项  详细内容  默认值"]
@@ -346,7 +378,13 @@ class PluginGenerator:
                         url = await self.star.text_to_image("\n".join(lines))
                         await event.send(event.image_result(url))
                     except Exception:
-                        await event.send(event.plain_result("\n".join([json.dumps(schema_obj, ensure_ascii=False)[:1800]])))
+                        await event.send(
+                            event.plain_result(
+                                "\n".join(
+                                    [json.dumps(schema_obj, ensure_ascii=False)[:1800]]
+                                )
+                            )
+                        )
             else:
                 # 如果不是有效的JSON，直接转图发送原始文本
                 try:
@@ -355,32 +393,37 @@ class PluginGenerator:
                 except Exception:
                     await event.send(event.plain_result(cfg_text[:1800]))
 
-    async def generate_plugin_flow(self, description: str, event: AstrMessageEvent) -> Dict[str, Any]:
-        '''执行完整的插件生成流程
+    async def generate_plugin_flow(
+        self, description: str, event: AstrMessageEvent
+    ) -> dict[str, Any]:
+        """执行完整的插件生成流程
         Args:
             description: 插件描述
             event: 消息事件
-            
+
         Returns:
             Dict[str, Any]: 生成结果
-        '''
+        """
         # 检查是否正在生成
         if self.generation_status["is_generating"]:
-            return {
-                "success": False,
-                "error": "已有插件正在生成中，请稍后再试"
-            }
-            
+            return {"success": False, "error": "已有插件正在生成中，请稍后再试"}
+
         # 设置生成状态
         self.generation_status["is_generating"] = True
         self.generation_status["start_time"] = format_time(time.time())
-        
-        def normalize_review_result(result: Dict[str, Any]) -> Dict[str, Any]:
+
+        def normalize_review_result(result: dict[str, Any]) -> dict[str, Any]:
             approved = result.get("approved")
             if approved is None:
                 approved = result.get("是否同意") or result.get("agree")
             if isinstance(approved, str):
-                approved = approved.strip().lower() in {"true", "yes", "同意", "通过", "approved"}
+                approved = approved.strip().lower() in {
+                    "true",
+                    "yes",
+                    "同意",
+                    "通过",
+                    "approved",
+                }
             result["approved"] = bool(approved)
             satisfaction = result.get("satisfaction_score")
             if satisfaction is None:
@@ -409,7 +452,7 @@ class PluginGenerator:
                 suggestions = ["请根据以下理由修复问题：" + reason]
             result["suggestions"] = suggestions
             return result
-        
+
         try:
             # 验证目录结构（根据配置选择安装方式）
             install_method = self.config.get("install_method", "auto")
@@ -418,7 +461,11 @@ class PluginGenerator:
             if install_method == "api":
                 use_api_install = True
                 if not self.config.get("api_password_md5"):
-                    await event.send(event.plain_result("已选择API安装，但未配置API密码(MD5)，将改为本地文件安装"))
+                    await event.send(
+                        event.plain_result(
+                            "已选择API安装，但未配置API密码(MD5)，将改为本地文件安装"
+                        )
+                    )
                     use_api_install = False
                     # 确保后续不走API安装分支
                     saved_api_pwd = self.config.get("api_password_md5")
@@ -433,104 +480,108 @@ class PluginGenerator:
                     restore_api_pwd = True
             else:
                 # auto 模式：如果配置了API密码则走API，否则走本地文件
-                use_api_install = bool(self.installer and self.config.get("api_password_md5"))
+                use_api_install = bool(
+                    self.installer and self.config.get("api_password_md5")
+                )
 
             dir_validation = self.directory_detector.validate_directory_structure()
             if not dir_validation["valid"]:
                 if use_api_install:
                     warn_msg = f"未检测到本地AstrBot安装目录，将使用API安装。{'; '.join(dir_validation['issues'])}"
-                    await event.send(event.plain_result("未检测到本地AstrBot安装目录，将使用API安装插件"))
+                    await event.send(
+                        event.plain_result(
+                            "未检测到本地AstrBot安装目录，将使用API安装插件"
+                        )
+                    )
                     self.logger.warning(warn_msg)
                 else:
                     message = f"目录结构验证失败：{'; '.join(dir_validation['issues'])}"
                     await event.send(event.plain_result(message))
                     self.logger.error(message)
-                    return {
-                        "success": False,
-                        "error": message
-                    }
-                    
+                    return {"success": False, "error": message}
+
             step_by_step = self.config.get("step_by_step", True)
-            metadata: Dict[str, Any] = {}
+            metadata: dict[str, Any] = {}
             markdown_doc = ""
             config_schema = ""
-            
+
             # 步骤1：生成插件元数据
             self._update_status(1)
             await event.send(event.plain_result("正在生成插件方案..."))
             try:
                 if step_by_step:
-                    metadata = await self.llm_handler.generate_metadata_structure(description)
+                    metadata = await self.llm_handler.generate_metadata_structure(
+                        description
+                    )
                 else:
-                    metadata = await self.llm_handler.generate_plugin_metadata(description)
+                    metadata = await self.llm_handler.generate_plugin_metadata(
+                        description
+                    )
                     markdown_doc = metadata.get("markdown", "")
             except Exception as generate_err:
                 error_msg = f"生成插件元数据失败：{str(generate_err)}"
                 self.logger.error(error_msg)
-                return {
-                    "success": False,
-                    "error": error_msg
-                }
-            
+                return {"success": False, "error": error_msg}
+
             if not isinstance(metadata, dict):
                 error_msg = "LLM返回的插件元数据格式不正确"
                 self.logger.error(error_msg)
-                return {
-                    "success": False,
-                    "error": error_msg
-                }
-            
+                return {"success": False, "error": error_msg}
+
             metadata.setdefault("metadata", {})
             metadata.setdefault("commands", [])
-            plugin_name = sanitize_plugin_name(metadata.get("name", "astrbot_plugin_generated"))
+            plugin_name = sanitize_plugin_name(
+                metadata.get("name", "astrbot_plugin_generated")
+            )
             if not plugin_name.startswith("astrbot_plugin_"):
                 plugin_name = f"astrbot_plugin_{plugin_name}"
             metadata["name"] = plugin_name
             self._update_status(1, plugin_name)
-            
+
             # 检查插件是否已存在
             if self.directory_detector.check_plugin_exists(plugin_name):
                 message = f"插件 '{plugin_name}' 已存在"
                 await event.send(event.plain_result(message))
                 self.logger.warning(message)
-                return {
-                    "success": False,
-                    "error": message
-                }
-                
+                return {"success": False, "error": message}
+
             # 步骤2：生成插件文档
             self._update_status(2, plugin_name)
             try:
                 if step_by_step or not markdown_doc:
-                    markdown_doc = await self.llm_handler.generate_markdown_document(metadata, description)
+                    markdown_doc = await self.llm_handler.generate_markdown_document(
+                        metadata, description
+                    )
             except Exception as doc_err:
                 error_msg = f"生成插件文档失败：{str(doc_err)}"
                 self.logger.error(error_msg)
-                return {
-                    "success": False,
-                    "error": error_msg
-                }
+                return {"success": False, "error": error_msg}
             metadata["markdown"] = markdown_doc
-            
+
             # 步骤3：生成配置文件
             self._update_status(3, plugin_name)
             try:
-                config_schema = await self.llm_handler.generate_config_schema(metadata, description)
+                config_schema = await self.llm_handler.generate_config_schema(
+                    metadata, description
+                )
                 config_schema = self._normalize_config_schema(config_schema)
             except Exception as config_err:
                 error_msg = f"生成配置文件失败：{str(config_err)}"
                 self.logger.error(error_msg)
-                return {
-                    "success": False,
-                    "error": error_msg
-                }
-            
+                return {"success": False, "error": error_msg}
+
             # 显示初步生成的插件方案（仅元数据信息） - 仅在非自动批准模式下显示
             if not self.config.get("auto_approve", False):
-                await event.send(event.plain_result(f"初步生成的插件方案：\n\n{self._build_preview_text(metadata, '', '')}"))
+                await event.send(
+                    event.plain_result(
+                        f"初步生成的插件方案：\n\n{self._build_preview_text(metadata, '', '')}"
+                    )
+                )
                 # 文档与配置以图片形式发送
-                await self._send_doc_and_config_images(event, metadata, markdown_doc, config_schema)
-            
+                await self._send_doc_and_config_images(
+                    event, metadata, markdown_doc, config_schema
+                )
+
             # 用户确认 - 修改为指令方式
             if not self.config.get("auto_approve", False):
                 # 保存待确认的任务信息
@@ -544,84 +595,107 @@ class PluginGenerator:
                     "umo": getattr(event, "unified_msg_origin", ""),
                     "timestamp": format_time(time.time()),
                     "awaiting_confirmation": True,
-                    "modification_history": []
+                    "modification_history": [],
                 }
                 # 持久化待确认任务，防止插件重载导致状态丢失
                 self._save_pending_state()
-                
-                await event.send(event.plain_result("请使用指令 '/同意生成' 确认生成，或 '/拒绝生成' 取消生成，或 '/插件内容修改 <修改内容> [配置文件/文档/元数据/全部]' 进行修改。"))
+
+                await event.send(
+                    event.plain_result(
+                        "请使用指令 '/同意生成' 确认生成，或 '/拒绝生成' 取消生成，或 '/插件内容修改 <修改内容> [配置文件/文档/元数据/全部]' 进行修改。"
+                    )
+                )
                 return {
                     "success": False,
                     "error": "等待用户确认",
-                    "pending_confirmation": True
+                    "pending_confirmation": True,
                 }
             else:
                 # 自动批准模式，跳过用户确认，直接继续生成
                 pass
-            
+
             # 步骤4：生成插件代码
             self._update_status(4, plugin_name)
             self.logger.info(f"开始生成插件代码: {plugin_name}")
             try:
-                code = await self.llm_handler.generate_plugin_code(metadata, markdown_doc, config_schema)
+                code = await self.llm_handler.generate_plugin_code(
+                    metadata, markdown_doc, config_schema
+                )
             except Exception as code_err:
                 error_msg = f"生成插件代码失败：{str(code_err)}"
                 if isinstance(code_err, TimeoutError) or "超时" in str(code_err):
                     error_msg += "\n提示：可在插件配置中增加 llm_timeout_seconds 的值"
                 self.logger.error(error_msg)
-                return {
-                    "success": False,
-                    "error": error_msg
-                }
-            
+                return {"success": False, "error": error_msg}
+
             # 步骤5：代码审查与修复
             self._update_status(5, plugin_name)
             self.logger.info(f"开始代码审查: {plugin_name}")
-            review_result = normalize_review_result(await self._review_code_with_retry(code, metadata, markdown_doc))
+            review_result = normalize_review_result(
+                await self._review_code_with_retry(code, metadata, markdown_doc)
+            )
             satisfaction_threshold = self.config.get("satisfaction_threshold", 80)
             strict_review = self.config.get("strict_review", True)
             max_retries = self.config.get("max_retries", 3)
             unlimited_retry = max_retries == -1
             retry_count = 0
-            
-            while ((review_result["satisfaction_score"] < satisfaction_threshold) or (not review_result["approved"])) and (unlimited_retry or retry_count < max_retries):
+
+            while (
+                (review_result["satisfaction_score"] < satisfaction_threshold)
+                or (not review_result["approved"])
+            ) and (unlimited_retry or retry_count < max_retries):
                 retry_count += 1
                 if strict_review and not review_result["approved"]:
-                    await event.send(event.plain_result(f"代码审查未通过，正在修复（第{retry_count}次重试）..."))
+                    await event.send(
+                        event.plain_result(
+                            f"代码审查未通过，正在修复（第{retry_count}次重试）..."
+                        )
+                    )
                 else:
-                    await event.send(event.plain_result(f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."))
-                code = await self.llm_handler.fix_plugin_code(code, review_result["issues"], review_result["suggestions"])
-                review_result = normalize_review_result(await self.llm_handler.review_plugin_code(code, metadata, markdown_doc))
-            
-            if (review_result["satisfaction_score"] < satisfaction_threshold) or (not review_result["approved"]):
+                    await event.send(
+                        event.plain_result(
+                            f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."
+                        )
+                    )
+                code = await self.llm_handler.fix_plugin_code(
+                    code, review_result["issues"], review_result["suggestions"]
+                )
+                review_result = normalize_review_result(
+                    await self.llm_handler.review_plugin_code(
+                        code, metadata, markdown_doc
+                    )
+                )
+
+            if (review_result["satisfaction_score"] < satisfaction_threshold) or (
+                not review_result["approved"]
+            ):
                 reason = review_result.get("reason", "代码审查未通过")
-                return {
-                    "success": False,
-                    "error": f"代码审查未通过：{reason}"
-                }
-            
+                return {"success": False, "error": f"代码审查未通过：{reason}"}
+
             # 跳过代码审查通过的消息输出
-            
+
             # 步骤6：生成最终插件并安装
             self._update_status(6, plugin_name)
-            
+
             result = {
                 "success": True,
                 "plugin_name": plugin_name,
                 "plugin_path": "",
                 "satisfaction_score": review_result["satisfaction_score"],
-                "installed": False
+                "installed": False,
             }
-            
+
             # 尝试通过API安装插件
             if self.installer and self.config.get("api_password_md5"):
                 # 使用带自动修复和重试的安装流程
-                install_result = await self._install_with_auto_retry(plugin_name, metadata, code, markdown_doc, config_schema, event)
-                
+                install_result = await self._install_with_auto_retry(
+                    plugin_name, metadata, code, markdown_doc, config_schema, event
+                )
+
                 result["installed"] = install_result.get("installed", False)
                 result["install_success"] = install_result.get("install_success", False)
                 result["plugin_path"] = install_result.get("plugin_path", "")
-                
+
                 if install_result.get("install_success"):
                     if install_result.get("has_runtime_errors"):
                         # 安装成功但有运行时错误（重试失败）
@@ -629,25 +703,34 @@ class PluginGenerator:
                         error_msg = "⚠️ 插件安装成功，但检测到运行时错误且自动修复失败"
                         await event.send(event.plain_result(error_msg))
                     else:
-                        await event.send(event.plain_result("✅ 插件已通过API安装并验证正常"))
+                        await event.send(
+                            event.plain_result("✅ 插件已通过API安装并验证正常")
+                        )
                 else:
                     result["install_error"] = install_result.get("error", "未知错误")
-                    await event.send(event.plain_result(f"❌ 插件安装失败: {install_result.get('error')}"))
+                    await event.send(
+                        event.plain_result(
+                            f"❌ 插件安装失败: {install_result.get('error')}"
+                        )
+                    )
             else:
                 self.logger.info("未配置API密码或installer，在本地创建插件文件")
-                plugin_path = await self._create_plugin_files(plugin_name, metadata, code, markdown_doc, config_schema)
+                plugin_path = await self._create_plugin_files(
+                    plugin_name, metadata, code, markdown_doc, config_schema
+                )
                 self.logger.info(f"插件生成成功: {plugin_name} -> {plugin_path}")
                 result["plugin_path"] = plugin_path
-                await event.send(event.plain_result(f"插件已在本地创建: {plugin_path}\n请手动重启AstrBot以加载插件"))
-            
+                await event.send(
+                    event.plain_result(
+                        f"插件已在本地创建: {plugin_path}\n请手动重启AstrBot以加载插件"
+                    )
+                )
+
             return result
-            
+
         except Exception as e:
             self.logger.error(f"插件生成流程失败：{str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
         finally:
             # 恢复API密码配置（如有临时修改）
             try:
@@ -659,13 +742,13 @@ class PluginGenerator:
             self.generation_status["current_step"] = 0
             self.generation_status["progress_percentage"] = 0
             self.generation_status["plugin_name"] = ""
-            
-    def get_pending_generation(self) -> Dict[str, Any]:
-        '''获取待确认的插件生成任务
-        
+
+    def get_pending_generation(self) -> dict[str, Any]:
+        """获取待确认的插件生成任务
+
         Returns:
             Dict[str, Any]: 待确认任务信息
-        '''
+        """
         # 如内存中不存在，尝试从文件恢复
         if not self.pending_generation.get("active"):
             try:
@@ -673,9 +756,9 @@ class PluginGenerator:
             except Exception:
                 pass
         return self.pending_generation.copy()
-        
+
     def clear_pending_generation(self):
-        '''清除待确认的插件生成任务'''
+        """清除待确认的插件生成任务"""
         # 删除持久化的状态文件
         try:
             self._delete_pending_state()
@@ -691,20 +774,25 @@ class PluginGenerator:
             "umo": "",
             "timestamp": "",
             "awaiting_confirmation": False,
-            "modification_history": []
+            "modification_history": [],
         }
-        
-    async def continue_plugin_generation(self, approved: bool, feedback: str = "", event: Optional[AstrMessageEvent] = None) -> Dict[str, Any]:
-        '''继续插件生成流程(用于指令确认)
-        
+
+    async def continue_plugin_generation(
+        self,
+        approved: bool,
+        feedback: str = "",
+        event: AstrMessageEvent | None = None,
+    ) -> dict[str, Any]:
+        """继续插件生成流程(用于指令确认)
+
         Args:
             approved: 是否同意生成
             feedback: 用户反馈(如果有)
             event: 当前消息事件，用于在继续流程时发送提示信息
-            
+
         Returns:
             Dict[str, Any]: 生成结果
-        '''
+        """
         if not self.pending_generation["active"]:
             # 尝试从文件恢复
             try:
@@ -712,11 +800,8 @@ class PluginGenerator:
             except Exception:
                 pass
         if not self.pending_generation["active"]:
-            return {
-                "success": False,
-                "error": "没有待确认的插件生成任务"
-            }
-            
+            return {"success": False, "error": "没有待确认的插件生成任务"}
+
         # 获取当前任务信息
         metadata = self.pending_generation["metadata"]
         markdown_doc = self.pending_generation["markdown"]
@@ -726,26 +811,27 @@ class PluginGenerator:
             event = self.pending_generation["event"]
         else:
             self.pending_generation["event"] = event
-        
+
         if not approved:
             await event.send(event.plain_result("用户拒绝，插件生成已完全停止"))
-            return {
-                "success": False,
-                "error": "用户拒绝了插件生成"
-            }
-            
+            return {"success": False, "error": "用户拒绝了插件生成"}
+
         # 如果有反馈，先优化插件方案
         if feedback:
             await event.send(event.plain_result("正在根据您的反馈优化插件方案..."))
             self.logger.info(f"根据用户反馈优化插件设计: {feedback}")
             try:
-                metadata = await self.llm_handler.optimize_plugin_metadata(metadata, feedback)
+                metadata = await self.llm_handler.optimize_plugin_metadata(
+                    metadata, feedback
+                )
                 if not isinstance(metadata, dict):
                     raise ValueError("LLM返回的优化结果格式不正确")
                 metadata.setdefault("metadata", {})
                 metadata.setdefault("commands", [])
                 markdown_doc = metadata.get("markdown", markdown_doc)
-                plugin_name = sanitize_plugin_name(metadata.get("name", metadata.get("name", "generated_plugin")))
+                plugin_name = sanitize_plugin_name(
+                    metadata.get("name", metadata.get("name", "generated_plugin"))
+                )
                 if not plugin_name.startswith("astrbot_plugin_"):
                     plugin_name = f"astrbot_plugin_{plugin_name}"
                 metadata["name"] = plugin_name
@@ -754,40 +840,44 @@ class PluginGenerator:
                 combined_description = description
                 if feedback:
                     combined_description = f"{description}\n\n用户反馈：{feedback}"
-                config_schema = await self.llm_handler.generate_config_schema(metadata, combined_description)
+                config_schema = await self.llm_handler.generate_config_schema(
+                    metadata, combined_description
+                )
 
                 # 检查插件是否已存在
                 if self.directory_detector.check_plugin_exists(plugin_name):
                     message = f"插件 '{plugin_name}' 已存在"
                     await event.send(event.plain_result(message))
                     self.logger.warning(message)
-                    return {
-                        "success": False,
-                        "error": message
-                    }
+                    return {"success": False, "error": message}
 
                 # 显示优化后的方案（仅元数据信息）
-                await event.send(event.plain_result(f"优化后的插件方案：\n\n{self._build_preview_text(metadata, '', '')}"))
-                await self._send_doc_and_config_images(event, metadata, markdown_doc, config_schema)
+                await event.send(
+                    event.plain_result(
+                        f"优化后的插件方案：\n\n{self._build_preview_text(metadata, '', '')}"
+                    )
+                )
+                await self._send_doc_and_config_images(
+                    event, metadata, markdown_doc, config_schema
+                )
             except Exception as e:
                 self.logger.error(f"优化插件方案失败: {str(e)}")
-                return {
-                    "success": False,
-                    "error": f"优化插件方案失败：{str(e)}"
-                }
-        
+                return {"success": False, "error": f"优化插件方案失败：{str(e)}"}
+
         # 继续执行生成流程的剩余步骤
         try:
             # 设置生成状态
             self.generation_status["is_generating"] = True
             self.generation_status["start_time"] = format_time(time.time())
-            
-            plugin_name = sanitize_plugin_name(metadata.get("name", "astrbot_plugin_generated"))
+
+            plugin_name = sanitize_plugin_name(
+                metadata.get("name", "astrbot_plugin_generated")
+            )
             if not plugin_name.startswith("astrbot_plugin_"):
                 plugin_name = f"astrbot_plugin_{plugin_name}"
             metadata["name"] = plugin_name
             self._update_status(4, plugin_name)
-            
+
             # 根据配置选择安装方式（可能临时禁用API安装）
             install_method = self.config.get("install_method", "auto")
             restore_api_pwd2 = False
@@ -798,35 +888,44 @@ class PluginGenerator:
                     self.config["api_password_md5"] = ""
                     restore_api_pwd2 = True
             elif install_method == "api" and not self.config.get("api_password_md5"):
-                await event.send(event.plain_result("已选择API安装，但未配置API密码(MD5)，将改为本地文件安装"))
+                await event.send(
+                    event.plain_result(
+                        "已选择API安装，但未配置API密码(MD5)，将改为本地文件安装"
+                    )
+                )
                 saved_api_pwd2 = self.config.get("api_password_md5")
                 self.config["api_password_md5"] = ""
                 restore_api_pwd2 = True
-            
+
             # 步骤4：生成插件代码
             self.logger.info(f"开始生成插件代码: {plugin_name}")
             try:
-                code = await self.llm_handler.generate_plugin_code(metadata, markdown_doc, config_schema)
+                code = await self.llm_handler.generate_plugin_code(
+                    metadata, markdown_doc, config_schema
+                )
             except Exception as code_err:
                 error_msg = f"生成插件代码失败：{str(code_err)}"
                 if isinstance(code_err, TimeoutError) or "超时" in str(code_err):
                     error_msg += "\n提示：可在插件配置中增加 llm_timeout_seconds 的值"
                 self.logger.error(error_msg)
-                return {
-                    "success": False,
-                    "error": error_msg
-                }
-            
+                return {"success": False, "error": error_msg}
+
             # 步骤5：代码审查与修复
             self._update_status(5, plugin_name)
             self.logger.info(f"开始代码审查: {plugin_name}")
-            
-            def normalize_review_result(result: Dict[str, Any]) -> Dict[str, Any]:
+
+            def normalize_review_result(result: dict[str, Any]) -> dict[str, Any]:
                 approved = result.get("approved")
                 if approved is None:
                     approved = result.get("是否同意") or result.get("agree")
                 if isinstance(approved, str):
-                    approved = approved.strip().lower() in {"true", "yes", "同意", "通过", "approved"}
+                    approved = approved.strip().lower() in {
+                        "true",
+                        "yes",
+                        "同意",
+                        "通过",
+                        "approved",
+                    }
                 result["approved"] = bool(approved)
                 satisfaction = result.get("satisfaction_score")
                 if satisfaction is None:
@@ -855,52 +954,72 @@ class PluginGenerator:
                     suggestions = ["请根据以下理由修复问题：" + reason]
                 result["suggestions"] = suggestions
                 return result
-                
-            review_result = normalize_review_result(await self._review_code_with_retry(code, metadata, markdown_doc))
+
+            review_result = normalize_review_result(
+                await self._review_code_with_retry(code, metadata, markdown_doc)
+            )
             satisfaction_threshold = self.config.get("satisfaction_threshold", 80)
             strict_review = self.config.get("strict_review", True)
             max_retries = self.config.get("max_retries", 3)
             unlimited_retry = max_retries == -1
             retry_count = 0
-            
-            while ((review_result["satisfaction_score"] < satisfaction_threshold) or (not review_result["approved"])) and (unlimited_retry or retry_count < max_retries):
+
+            while (
+                (review_result["satisfaction_score"] < satisfaction_threshold)
+                or (not review_result["approved"])
+            ) and (unlimited_retry or retry_count < max_retries):
                 retry_count += 1
                 if strict_review and not review_result["approved"]:
-                    await event.send(event.plain_result(f"代码审查未通过，正在修复（第{retry_count}次重试）..."))
+                    await event.send(
+                        event.plain_result(
+                            f"代码审查未通过，正在修复（第{retry_count}次重试）..."
+                        )
+                    )
                 else:
-                    await event.send(event.plain_result(f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."))
-                code = await self.llm_handler.fix_plugin_code(code, review_result["issues"], review_result["suggestions"])
-                review_result = normalize_review_result(await self.llm_handler.review_plugin_code(code, metadata, markdown_doc))
-            
-            if (review_result["satisfaction_score"] < satisfaction_threshold) or (not review_result["approved"]):
+                    await event.send(
+                        event.plain_result(
+                            f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."
+                        )
+                    )
+                code = await self.llm_handler.fix_plugin_code(
+                    code, review_result["issues"], review_result["suggestions"]
+                )
+                review_result = normalize_review_result(
+                    await self.llm_handler.review_plugin_code(
+                        code, metadata, markdown_doc
+                    )
+                )
+
+            if (review_result["satisfaction_score"] < satisfaction_threshold) or (
+                not review_result["approved"]
+            ):
                 reason = review_result.get("reason", "代码审查未通过")
-                return {
-                    "success": False,
-                    "error": f"代码审查未通过：{reason}"
-                }
-            
+                return {"success": False, "error": f"代码审查未通过：{reason}"}
+
             # 跳过代码审查通过的消息输出
-            
+
             # 步骤6：生成最终插件并安装
             self._update_status(6, plugin_name)
-            
+
             result = {
                 "success": True,
                 "plugin_name": plugin_name,
                 "plugin_path": "",
                 "satisfaction_score": review_result["satisfaction_score"],
-                "installed": False
+                "installed": False,
             }
-            
+
             # 尝试通过API安装插件
             if self.installer and self.config.get("api_password_md5"):
                 # 使用带自动修复和重试的安装流程
-                install_result = await self._install_with_auto_retry(plugin_name, metadata, code, markdown_doc, config_schema, event)
-                
+                install_result = await self._install_with_auto_retry(
+                    plugin_name, metadata, code, markdown_doc, config_schema, event
+                )
+
                 result["installed"] = install_result.get("installed", False)
                 result["install_success"] = install_result.get("install_success", False)
                 result["plugin_path"] = install_result.get("plugin_path", "")
-                
+
                 if install_result.get("install_success"):
                     if install_result.get("has_runtime_errors"):
                         # 安装成功但有运行时错误（重试失败）
@@ -908,25 +1027,34 @@ class PluginGenerator:
                         error_msg = "⚠️ 插件安装成功，但检测到运行时错误且自动修复失败"
                         await event.send(event.plain_result(error_msg))
                     else:
-                        await event.send(event.plain_result("✅ 插件已通过API安装并验证正常"))
+                        await event.send(
+                            event.plain_result("✅ 插件已通过API安装并验证正常")
+                        )
                 else:
                     result["install_error"] = install_result.get("error", "未知错误")
-                    await event.send(event.plain_result(f"❌ 插件安装失败: {install_result.get('error')}"))
+                    await event.send(
+                        event.plain_result(
+                            f"❌ 插件安装失败: {install_result.get('error')}"
+                        )
+                    )
             else:
                 self.logger.info("未配置API密码或installer，在本地创建插件文件")
-                plugin_path = await self._create_plugin_files(plugin_name, metadata, code, markdown_doc, config_schema)
+                plugin_path = await self._create_plugin_files(
+                    plugin_name, metadata, code, markdown_doc, config_schema
+                )
                 self.logger.info(f"插件生成成功: {plugin_name} -> {plugin_path}")
                 result["plugin_path"] = plugin_path
-                await event.send(event.plain_result(f"插件已在本地创建: {plugin_path}\n请手动重启AstrBot以加载插件"))
-            
+                await event.send(
+                    event.plain_result(
+                        f"插件已在本地创建: {plugin_path}\n请手动重启AstrBot以加载插件"
+                    )
+                )
+
             return result
-            
+
         except Exception as e:
             self.logger.error(f"插件生成流程失败：{str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
         finally:
             # 恢复API密码配置（如有临时修改）
             try:
@@ -938,10 +1066,18 @@ class PluginGenerator:
             self.generation_status["current_step"] = 0
             self.generation_status["progress_percentage"] = 0
             self.generation_status["plugin_name"] = ""
-        
-    async def _install_with_auto_retry(self, plugin_name: str, metadata: Dict[str, Any], code: str, markdown: str, config_schema: str, event: AstrMessageEvent) -> Dict[str, Any]:
+
+    async def _install_with_auto_retry(
+        self,
+        plugin_name: str,
+        metadata: dict[str, Any],
+        code: str,
+        markdown: str,
+        config_schema: str,
+        event: AstrMessageEvent,
+    ) -> dict[str, Any]:
         """带自动修复和重试的插件安装流程
-        
+
         Args:
             plugin_name: 插件名称
             metadata: 插件元数据
@@ -949,98 +1085,119 @@ class PluginGenerator:
             markdown: Markdown文档
             config_schema: 配置文件内容
             event: 消息事件
-            
+
         Returns:
             Dict[str, Any]: 安装结果
         """
-        import tempfile
         import shutil
-        
+        import tempfile
+
         max_retries = self.installer.max_retries
         current_retry = 0
         current_code = code
-        
+
         while current_retry <= max_retries:
             temp_dir = tempfile.mkdtemp(prefix="codemage_plugin_")
             zip_path = None
-            
+
             try:
                 # 1. 创建插件文件
-                plugin_path = await self._create_plugin_files(plugin_name, metadata, current_code, markdown, config_schema, base_dir=temp_dir)
-                self.logger.info(f"插件已在临时目录生成 (尝试 {current_retry + 1}/{max_retries + 1}): {plugin_name}")
-                
+                plugin_path = await self._create_plugin_files(
+                    plugin_name,
+                    metadata,
+                    current_code,
+                    markdown,
+                    config_schema,
+                    base_dir=temp_dir,
+                )
+                self.logger.info(
+                    f"插件已在临时目录生成 (尝试 {current_retry + 1}/{max_retries + 1}): {plugin_name}"
+                )
+
                 # 2. 打包插件
                 zip_path = await self.installer.create_plugin_zip(plugin_path)
                 if not zip_path:
-                    return {
-                        "success": False,
-                        "error": "插件打包失败"
-                    }
-                    
+                    return {"success": False, "error": "插件打包失败"}
+
                 # 3. 安装插件
                 if current_retry > 0:
-                    await event.send(event.plain_result(f"正在重试安装插件 (第 {current_retry} 次重试)..."))
+                    await event.send(
+                        event.plain_result(
+                            f"正在重试安装插件 (第 {current_retry} 次重试)..."
+                        )
+                    )
                 else:
                     await event.send(event.plain_result("正在通过API安装插件..."))
-                    
+
                 install_result = await self.installer.install_plugin(zip_path)
-                
+
                 if not install_result.get("success"):
                     # 安装请求本身失败（如网络问题、认证失败等），通常不需要修复代码，直接返回失败
                     return {
                         "success": False,
-                        "error": f"插件安装请求失败: {install_result.get('error')}"
+                        "error": f"插件安装请求失败: {install_result.get('error')}",
                     }
-                
+
                 # 4. 检查安装状态和错误日志
                 # 跳过插件运行状态检查的消息输出
-                status_check = await self.installer.check_plugin_install_status(plugin_name)
-                
+                status_check = await self.installer.check_plugin_install_status(
+                    plugin_name
+                )
+
                 if not status_check.get("has_errors"):
                     # 安装成功且无错误
                     self.logger.info(f"✅ 插件安装成功且运行正常: {plugin_name}")
                     return {
                         "success": True,
-                        "plugin_path": plugin_path, # 注意：这里返回的是临时路径，但对于API安装来说不重要
+                        "plugin_path": plugin_path,  # 注意：这里返回的是临时路径，但对于API安装来说不重要
                         "installed": True,
-                        "install_success": True
+                        "install_success": True,
                     }
-                
+
                 # 5. 检测到错误，准备修复
                 error_logs = status_check.get("error_logs", [])
                 error_msg = "\n".join(error_logs)
-                self.logger.warning(f"检测到插件错误 (尝试 {current_retry + 1}):\n{error_msg}")
-                
+                self.logger.warning(
+                    f"检测到插件错误 (尝试 {current_retry + 1}):\n{error_msg}"
+                )
+
                 if current_retry >= max_retries:
                     # 达到最大重试次数，放弃
-                    await event.send(event.plain_result(f"❌ 插件安装后检测到错误，且已达到最大重试次数:\n{error_msg}"))
+                    await event.send(
+                        event.plain_result(
+                            f"❌ 插件安装后检测到错误，且已达到最大重试次数:\n{error_msg}"
+                        )
+                    )
                     return {
-                        "success": True, # 标记为True以便流程结束，但在结果中标记安装有错误
+                        "success": True,  # 标记为True以便流程结束，但在结果中标记安装有错误
                         "plugin_path": plugin_path,
                         "installed": True,
-                        "install_success": True, # 安装动作是成功的
+                        "install_success": True,  # 安装动作是成功的
                         "has_runtime_errors": True,
-                        "runtime_errors": error_logs
+                        "runtime_errors": error_logs,
                     }
-                
+
                 # 6. 尝试自动修复
-                await event.send(event.plain_result("⚠️ 检测到插件错误，正在尝试自动修复..."))
-                
+                await event.send(
+                    event.plain_result("⚠️ 检测到插件错误，正在尝试自动修复...")
+                )
+
                 # 删除已安装的插件
                 await self.installer.delete_plugin_folder(plugin_name)
-                
+
                 # 请求LLM修复代码
-                fix_prompt = f"插件安装后运行报错，请修复代码。\n错误日志：\n{error_msg}"
-                current_code = await self.llm_handler.fix_plugin_code(current_code, [fix_prompt], ["请根据错误日志修复代码"])
-                
+                fix_prompt = (
+                    f"插件安装后运行报错，请修复代码。\n错误日志：\n{error_msg}"
+                )
+                current_code = await self.llm_handler.fix_plugin_code(
+                    current_code, [fix_prompt], ["请根据错误日志修复代码"]
+                )
+
                 current_retry += 1
-                
+
             except Exception as e:
                 self.logger.error(f"自动修复流程异常: {str(e)}")
-                return {
-                    "success": False,
-                    "error": f"自动修复流程异常: {str(e)}"
-                }
+                return {"success": False, "error": f"自动修复流程异常: {str(e)}"}
             finally:
                 # 清理临时文件
                 if zip_path and os.path.exists(zip_path):
@@ -1053,31 +1210,32 @@ class PluginGenerator:
                         shutil.rmtree(temp_dir)
                     except Exception:
                         pass
-                        
-        return {
-            "success": False,
-            "error": "未知错误"
-        }
 
-    async def _review_code_with_retry(self, code: str, metadata: Dict[str, Any],
-                                    markdown: str,
-                                    max_retries: int = 3) -> Dict[str, Any]:
-        '''带重试的代码审查
-        
+        return {"success": False, "error": "未知错误"}
+
+    async def _review_code_with_retry(
+        self, code: str, metadata: dict[str, Any], markdown: str, max_retries: int = 3
+    ) -> dict[str, Any]:
+        """带重试的代码审查
+
         Args:
             code: 插件代码
             metadata: 插件元数据
             markdown: 插件Markdown文档
             max_retries: 最大重试次数
-            
+
         Returns:
             Dict[str, Any]: 审查结果
-        '''
+        """
         for attempt in range(max_retries):
             try:
-                return await self.llm_handler.review_plugin_code(code, metadata, markdown)
+                return await self.llm_handler.review_plugin_code(
+                    code, metadata, markdown
+                )
             except Exception as e:
-                self.logger.error(f"代码审查失败（尝试 {attempt + 1}/{max_retries}）：{str(e)}")
+                self.logger.error(
+                    f"代码审查失败（尝试 {attempt + 1}/{max_retries}）：{str(e)}"
+                )
                 if attempt == max_retries - 1:
                     # 返回一个默认的失败结果
                     return {
@@ -1085,20 +1243,28 @@ class PluginGenerator:
                         "satisfaction_score": 0,
                         "reason": f"代码审查失败：{str(e)}",
                         "issues": ["代码审查失败"],
-                        "suggestions": ["请检查代码并重试"]
+                        "suggestions": ["请检查代码并重试"],
                     }
-                    
+
         return {
             "approved": False,
             "satisfaction_score": 0,
             "reason": "代码审查失败",
             "issues": ["代码审查失败"],
-            "suggestions": ["请检查代码并重试"]
+            "suggestions": ["请检查代码并重试"],
         }
-        
-    async def _create_plugin_files(self, plugin_name: str, metadata: Dict[str, Any], code: str, markdown: str, config_schema: str = "", base_dir: Optional[str] = None) -> str:
-        '''创建插件文件
-        
+
+    async def _create_plugin_files(
+        self,
+        plugin_name: str,
+        metadata: dict[str, Any],
+        code: str,
+        markdown: str,
+        config_schema: str = "",
+        base_dir: str | None = None,
+    ) -> str:
+        """创建插件文件
+
         Args:
             plugin_name: 插件名称
             metadata: 插件元数据
@@ -1106,10 +1272,10 @@ class PluginGenerator:
             markdown: Markdown文档
             config_schema: 配置文件内容
             base_dir: 基础目录路径（可选）。如果提供，则在此目录下创建，否则在plugins目录创建
-            
+
         Returns:
             str: 插件路径
-        '''
+        """
         # 获取插件目录
         if base_dir:
             plugins_dir = base_dir
@@ -1117,77 +1283,97 @@ class PluginGenerator:
             plugins_dir = self.directory_detector.get_plugins_directory()
             if not plugins_dir:
                 raise ValueError("无法获取插件目录")
-            
+
         # 创建插件目录
         plugin_dir = create_plugin_directory(plugins_dir, plugin_name)
-        
+
         # 创建main.py
         main_py_path = os.path.join(plugin_dir, "main.py")
-        with open(main_py_path, 'w', encoding='utf-8') as f:
+        with open(main_py_path, "w", encoding="utf-8") as f:
             f.write(code)
-            
+
         # 创建metadata.yaml
         metadata_yaml_path = os.path.join(plugin_dir, "metadata.yaml")
-        metadata_content = metadata.get('metadata', {}) if isinstance(metadata.get('metadata'), dict) else {}
+        metadata_content = (
+            metadata.get("metadata", {})
+            if isinstance(metadata.get("metadata"), dict)
+            else {}
+        )
         yaml_content = f"name: {metadata.get('name', plugin_name)}\n"
         yaml_content += f"author: {metadata.get('author', 'CodeMage')}\n"
-        yaml_content += f"description: {metadata.get('description', '由CodeMage生成的插件')}\n"
+        yaml_content += (
+            f"description: {metadata.get('description', '由CodeMage生成的插件')}\n"
+        )
         yaml_content += f"version: {metadata.get('version', '1.0.0')}\n"
         yaml_content += f"repo: {metadata_content.get('repo_url', '')}\n"
-        with open(metadata_yaml_path, 'w', encoding='utf-8') as f:
+        with open(metadata_yaml_path, "w", encoding="utf-8") as f:
             f.write(yaml_content)
-            
+
         # 创建requirements.txt（如果有依赖）
-        dependencies = metadata_content.get('dependencies', []) if isinstance(metadata_content, dict) else []
-        if dependencies and self.config.get('allow_dependencies', True):
+        dependencies = (
+            metadata_content.get("dependencies", [])
+            if isinstance(metadata_content, dict)
+            else []
+        )
+        if dependencies and self.config.get("allow_dependencies", True):
             requirements_path = os.path.join(plugin_dir, "requirements.txt")
-            with open(requirements_path, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(dependencies))
-            self.logger.info(f"已创建requirements.txt文件，包含{len(dependencies)}个依赖")
+            with open(requirements_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(dependencies))
+            self.logger.info(
+                f"已创建requirements.txt文件，包含{len(dependencies)}个依赖"
+            )
         else:
             self.logger.info("未创建requirements.txt文件（无依赖或依赖生成被禁用）")
-                
+
         # 创建README.md
         readme_path = os.path.join(plugin_dir, "README.md")
-        readme_content = markdown if markdown.strip() else f"# {metadata.get('name', plugin_name)}\n\n由CodeMage生成的插件"
-        with open(readme_path, 'w', encoding='utf-8') as f:
+        readme_content = (
+            markdown
+            if markdown.strip()
+            else f"# {metadata.get('name', plugin_name)}\n\n由CodeMage生成的插件"
+        )
+        with open(readme_path, "w", encoding="utf-8") as f:
             f.write(readme_content)
-        
+
         # 创建_conf_schema.json（如果有配置）
         if config_schema and config_schema.strip():
             config_path = os.path.join(plugin_dir, "_conf_schema.json")
             try:
                 parsed_config = json.loads(config_schema)
-                formatted_config = json.dumps(parsed_config, ensure_ascii=False, indent=2)
+                formatted_config = json.dumps(
+                    parsed_config, ensure_ascii=False, indent=2
+                )
             except json.JSONDecodeError:
                 formatted_config = config_schema
-            with open(config_path, 'w', encoding='utf-8') as f:
+            with open(config_path, "w", encoding="utf-8") as f:
                 f.write(formatted_config)
-            self.logger.info(f"已创建_conf_schema.json配置文件")
-            
+            self.logger.info("已创建_conf_schema.json配置文件")
+
         return plugin_dir
-    
-    async def modify_plugin_content(self, modification_type: str, feedback: str = "", event: Optional[AstrMessageEvent] = None) -> Dict[str, Any]:
-        '''修改插件内容
-        
+
+    async def modify_plugin_content(
+        self,
+        modification_type: str,
+        feedback: str = "",
+        event: AstrMessageEvent | None = None,
+    ) -> dict[str, Any]:
+        """修改插件内容
+
         Args:
             modification_type: 修改类型(配置文件/文档/元数据/全部)
             feedback: 用户反馈
-            
+
         Returns:
             Dict[str, Any]: 修改结果
-        '''
+        """
         if not self.pending_generation["active"]:
             try:
                 self._load_pending_state()
             except Exception:
                 pass
         if not self.pending_generation["active"]:
-            return {
-                "success": False,
-                "error": "没有待确认的插件生成任务"
-            }
-            
+            return {"success": False, "error": "没有待确认的插件生成任务"}
+
         # 获取当前任务信息
         metadata = self.pending_generation["metadata"]
         markdown_doc = self.pending_generation["markdown"]
@@ -1197,111 +1383,129 @@ class PluginGenerator:
             event = self.pending_generation["event"]
         else:
             self.pending_generation["event"] = event
-        
+
         try:
             # 根据修改类型进行不同的处理
             if modification_type == "配置文件":
                 await event.send(event.plain_result("正在重新生成配置文件..."))
                 self.logger.info(f"重新生成配置文件，用户反馈: {feedback}")
-                config_schema = await self.llm_handler.modify_config_schema(config_schema, metadata, feedback)
+                config_schema = await self.llm_handler.modify_config_schema(
+                    config_schema, metadata, feedback
+                )
                 config_schema = self._normalize_config_schema(config_schema)
                 await event.send(event.plain_result("配置文件已重新生成"))
-                
+
             elif modification_type == "文档":
                 await event.send(event.plain_result("正在重新生成文档..."))
                 self.logger.info(f"重新生成文档，用户反馈: {feedback}")
-                markdown_doc = await self.llm_handler.modify_markdown_document(markdown_doc, metadata, feedback)
+                markdown_doc = await self.llm_handler.modify_markdown_document(
+                    markdown_doc, metadata, feedback
+                )
                 metadata["markdown"] = markdown_doc
                 await event.send(event.plain_result("文档已重新生成"))
-                
+
             elif modification_type == "元数据":
                 await event.send(event.plain_result("正在重新生成元数据..."))
                 self.logger.info(f"重新生成元数据，用户反馈: {feedback}")
-                metadata = await self.llm_handler.modify_plugin_metadata(metadata, feedback)
+                metadata = await self.llm_handler.modify_plugin_metadata(
+                    metadata, feedback
+                )
                 metadata.setdefault("metadata", {})
                 metadata.setdefault("commands", [])
-                plugin_name = sanitize_plugin_name(metadata.get("name", "astrbot_plugin_generated"))
+                plugin_name = sanitize_plugin_name(
+                    metadata.get("name", "astrbot_plugin_generated")
+                )
                 if not plugin_name.startswith("astrbot_plugin_"):
                     plugin_name = f"astrbot_plugin_{plugin_name}"
                 metadata["name"] = plugin_name
-                
+
                 # 检查插件是否已存在
                 if self.directory_detector.check_plugin_exists(plugin_name):
-                    return {
-                        "success": False,
-                        "error": f"插件 '{plugin_name}' 已存在"
-                    }
+                    return {"success": False, "error": f"插件 '{plugin_name}' 已存在"}
                 await event.send(event.plain_result("元数据已重新生成"))
-                
+
             elif modification_type == "全部" or not modification_type:
                 await event.send(event.plain_result("正在重新生成整个插件方案..."))
                 self.logger.info(f"重新生成整个方案，用户反馈: {feedback}")
-                
+
                 # 重新生成元数据
                 combined_description = description
                 if feedback:
                     combined_description = f"{description}\n\n用户修改要求：{feedback}"
                 step_by_step = self.config.get("step_by_step", True)
                 if step_by_step:
-                    metadata = await self.llm_handler.generate_metadata_structure(combined_description)
+                    metadata = await self.llm_handler.generate_metadata_structure(
+                        combined_description
+                    )
                     metadata.setdefault("metadata", {})
                     metadata.setdefault("commands", [])
-                    markdown_doc = await self.llm_handler.generate_markdown_document(metadata, combined_description)
+                    markdown_doc = await self.llm_handler.generate_markdown_document(
+                        metadata, combined_description
+                    )
                 else:
-                    metadata = await self.llm_handler.generate_plugin_metadata(combined_description)
+                    metadata = await self.llm_handler.generate_plugin_metadata(
+                        combined_description
+                    )
                     metadata.setdefault("metadata", {})
                     metadata.setdefault("commands", [])
                     markdown_doc = metadata.get("markdown", "")
-                plugin_name = sanitize_plugin_name(metadata.get("name", "astrbot_plugin_generated"))
+                plugin_name = sanitize_plugin_name(
+                    metadata.get("name", "astrbot_plugin_generated")
+                )
                 if not plugin_name.startswith("astrbot_plugin_"):
                     plugin_name = f"astrbot_plugin_{plugin_name}"
                 metadata["name"] = plugin_name
                 metadata["markdown"] = markdown_doc
-                
+
                 # 检查插件是否已存在
                 if self.directory_detector.check_plugin_exists(plugin_name):
-                    return {
-                        "success": False,
-                        "error": f"插件 '{plugin_name}' 已存在"
-                    }
-                
+                    return {"success": False, "error": f"插件 '{plugin_name}' 已存在"}
+
                 # 重新生成配置
-                config_schema = await self.llm_handler.generate_config_schema(metadata, combined_description)
+                config_schema = await self.llm_handler.generate_config_schema(
+                    metadata, combined_description
+                )
                 config_schema = self._normalize_config_schema(config_schema)
-                
+
                 await event.send(event.plain_result("整个插件方案已重新生成"))
             else:
                 return {
                     "success": False,
-                    "error": f"不支持的修改类型：{modification_type}"
+                    "error": f"不支持的修改类型：{modification_type}",
                 }
-            
+
             # 更新待确认任务
-            self.pending_generation.update({
-                "metadata": metadata,
-                "markdown": markdown_doc,
-                "config_schema": config_schema,
-                "awaiting_confirmation": True
-            })
+            self.pending_generation.update(
+                {
+                    "metadata": metadata,
+                    "markdown": markdown_doc,
+                    "config_schema": config_schema,
+                    "awaiting_confirmation": True,
+                }
+            )
             # 持久化更新后的任务状态
             try:
                 self._save_pending_state()
             except Exception:
                 pass
-            
+
             # 显示更新后的方案（仅元数据信息），并以图片发送文档与配置
-            await event.send(event.plain_result(f"更新后的插件方案：\n\n{self._build_preview_text(metadata, '', '')}"))
-            await self._send_doc_and_config_images(event, metadata, markdown_doc, config_schema)
-            await event.send(event.plain_result("请使用指令 '/同意生成' 确认生成，或 '/拒绝生成' 取消生成，或继续使用 '/插件内容修改' 进行修改。"))
-            
-            return {
-                "success": True,
-                "message": f"{modification_type}已重新生成"
-            }
-            
+            await event.send(
+                event.plain_result(
+                    f"更新后的插件方案：\n\n{self._build_preview_text(metadata, '', '')}"
+                )
+            )
+            await self._send_doc_and_config_images(
+                event, metadata, markdown_doc, config_schema
+            )
+            await event.send(
+                event.plain_result(
+                    "请使用指令 '/同意生成' 确认生成，或 '/拒绝生成' 取消生成，或继续使用 '/插件内容修改' 进行修改。"
+                )
+            )
+
+            return {"success": True, "message": f"{modification_type}已重新生成"}
+
         except Exception as e:
             self.logger.error(f"修改插件内容失败: {str(e)}")
-            return {
-                "success": False,
-                "error": f"修改插件内容失败：{str(e)}"
-            }
+            return {"success": False, "error": f"修改插件内容失败：{str(e)}"}
