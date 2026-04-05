@@ -505,23 +505,32 @@ class PluginGenerator:
             markdown_doc = ""
             config_schema = ""
 
+            max_retries = self.config.get("max_retries", 3)
+            unlimited_retry = max_retries == -1
+
             # 步骤1：生成插件元数据
             self._update_status(1)
             await event.send(event.plain_result("正在生成插件方案..."))
-            try:
-                if step_by_step:
-                    metadata = await self.llm_handler.generate_metadata_structure(
-                        description
-                    )
-                else:
-                    metadata = await self.llm_handler.generate_plugin_metadata(
-                        description
-                    )
-                    markdown_doc = metadata.get("markdown", "")
-            except Exception as generate_err:
-                error_msg = f"生成插件元数据失败：{str(generate_err)}"
-                self.logger.error(error_msg)
-                return {"success": False, "error": error_msg}
+            retry_count = 0
+            while True:
+                try:
+                    if step_by_step:
+                        metadata = await self.llm_handler.generate_metadata_structure(
+                            description
+                        )
+                    else:
+                        metadata = await self.llm_handler.generate_plugin_metadata(
+                            description
+                        )
+                        markdown_doc = metadata.get("markdown", "")
+                    break
+                except Exception as generate_err:
+                    retry_count += 1
+                    if not unlimited_retry and retry_count > max_retries:
+                        error_msg = f"生成插件失败（已重试{max_retries}次）：{str(generate_err)}"
+                        self.logger.error(error_msg)
+                        return {"success": False, "error": error_msg}
+                    self.logger.warning(f"生成失败，重试 {retry_count}/{max_retries}：{str(generate_err)}")
 
             if not isinstance(metadata, dict):
                 error_msg = "LLM返回的插件元数据格式不正确"
@@ -547,28 +556,40 @@ class PluginGenerator:
 
             # 步骤2：生成插件文档
             self._update_status(2, plugin_name)
-            try:
-                if step_by_step or not markdown_doc:
-                    markdown_doc = await self.llm_handler.generate_markdown_document(
-                        metadata, description
-                    )
-            except Exception as doc_err:
-                error_msg = f"生成插件文档失败：{str(doc_err)}"
-                self.logger.error(error_msg)
-                return {"success": False, "error": error_msg}
+            retry_count = 0
+            while True:
+                try:
+                    if step_by_step or not markdown_doc:
+                        markdown_doc = await self.llm_handler.generate_markdown_document(
+                            metadata, description
+                        )
+                    break
+                except Exception as doc_err:
+                    retry_count += 1
+                    if not unlimited_retry and retry_count > max_retries:
+                        error_msg = f"生成插件失败（已重试{max_retries}次）：{str(doc_err)}"
+                        self.logger.error(error_msg)
+                        return {"success": False, "error": error_msg}
+                    self.logger.warning(f"生成失败，重试 {retry_count}/{max_retries}：{str(doc_err)}")
             metadata["markdown"] = markdown_doc
 
             # 步骤3：生成配置文件
             self._update_status(3, plugin_name)
-            try:
-                config_schema = await self.llm_handler.generate_config_schema(
-                    metadata, description
-                )
-                config_schema = self._normalize_config_schema(config_schema)
-            except Exception as config_err:
-                error_msg = f"生成配置文件失败：{str(config_err)}"
-                self.logger.error(error_msg)
-                return {"success": False, "error": error_msg}
+            retry_count = 0
+            while True:
+                try:
+                    config_schema = await self.llm_handler.generate_config_schema(
+                        metadata, description
+                    )
+                    config_schema = self._normalize_config_schema(config_schema)
+                    break
+                except Exception as config_err:
+                    retry_count += 1
+                    if not unlimited_retry and retry_count > max_retries:
+                        error_msg = f"生成插件失败（已重试{max_retries}次）：{str(config_err)}"
+                        self.logger.error(error_msg)
+                        return {"success": False, "error": error_msg}
+                    self.logger.warning(f"生成失败，重试 {retry_count}/{max_retries}：{str(config_err)}")
 
             # 显示初步生成的插件方案（仅元数据信息） - 仅在非自动批准模式下显示
             if not self.config.get("auto_approve", False):
@@ -617,16 +638,22 @@ class PluginGenerator:
             # 步骤4：生成插件代码
             self._update_status(4, plugin_name)
             self.logger.info(f"开始生成插件代码: {plugin_name}")
-            try:
-                code = await self.llm_handler.generate_plugin_code(
-                    metadata, markdown_doc, config_schema
-                )
-            except Exception as code_err:
-                error_msg = f"生成插件代码失败：{str(code_err)}"
-                if isinstance(code_err, TimeoutError) or "超时" in str(code_err):
-                    error_msg += "\n提示：可在插件配置中增加 llm_timeout_seconds 的值"
-                self.logger.error(error_msg)
-                return {"success": False, "error": error_msg}
+            retry_count = 0
+            while True:
+                try:
+                    code = await self.llm_handler.generate_plugin_code(
+                        metadata, markdown_doc, config_schema
+                    )
+                    break
+                except Exception as code_err:
+                    retry_count += 1
+                    if not unlimited_retry and retry_count > max_retries:
+                        error_msg = f"生成插件代码失败（已重试{max_retries}次）：{str(code_err)}"
+                        if isinstance(code_err, TimeoutError) or "超时" in str(code_err):
+                            error_msg += "\n提示：可在插件配置中增加 llm_timeout_seconds 的值"
+                        self.logger.error(error_msg)
+                        return {"success": False, "error": error_msg}
+                    self.logger.warning(f"生成代码失败，重试 {retry_count}/{max_retries}：{str(code_err)}")
 
             # 步骤5：代码审查与修复
             self._update_status(5, plugin_name)
@@ -820,49 +847,58 @@ class PluginGenerator:
         if feedback:
             await event.send(event.plain_result("正在根据您的反馈优化插件方案..."))
             self.logger.info(f"根据用户反馈优化插件设计: {feedback}")
-            try:
-                metadata = await self.llm_handler.optimize_plugin_metadata(
-                    metadata, feedback
-                )
-                if not isinstance(metadata, dict):
-                    raise ValueError("LLM返回的优化结果格式不正确")
-                metadata.setdefault("metadata", {})
-                metadata.setdefault("commands", [])
-                markdown_doc = metadata.get("markdown", markdown_doc)
-                plugin_name = sanitize_plugin_name(
-                    metadata.get("name", metadata.get("name", "generated_plugin"))
-                )
-                if not plugin_name.startswith("astrbot_plugin_"):
-                    plugin_name = f"astrbot_plugin_{plugin_name}"
-                metadata["name"] = plugin_name
-                metadata["markdown"] = markdown_doc
-
-                combined_description = description
-                if feedback:
-                    combined_description = f"{description}\n\n用户反馈：{feedback}"
-                config_schema = await self.llm_handler.generate_config_schema(
-                    metadata, combined_description
-                )
-
-                # 检查插件是否已存在
-                if self.directory_detector.check_plugin_exists(plugin_name):
-                    message = f"插件 '{plugin_name}' 已存在"
-                    await event.send(event.plain_result(message))
-                    self.logger.warning(message)
-                    return {"success": False, "error": message}
-
-                # 显示优化后的方案（仅元数据信息）
-                await event.send(
-                    event.plain_result(
-                        f"优化后的插件方案：\n\n{self._build_preview_text(metadata, '', '')}"
+            max_retries_fb = self.config.get("max_retries", 3)
+            unlimited_retry_fb = max_retries_fb == -1
+            retry_count_fb = 0
+            while True:
+                try:
+                    metadata = await self.llm_handler.optimize_plugin_metadata(
+                        metadata, feedback
                     )
-                )
-                await self._send_doc_and_config_images(
-                    event, metadata, markdown_doc, config_schema
-                )
-            except Exception as e:
-                self.logger.error(f"优化插件方案失败: {str(e)}")
-                return {"success": False, "error": f"优化插件方案失败：{str(e)}"}
+                    if not isinstance(metadata, dict):
+                        raise ValueError("LLM返回的优化结果格式不正确")
+                    metadata.setdefault("metadata", {})
+                    metadata.setdefault("commands", [])
+                    markdown_doc = metadata.get("markdown", markdown_doc)
+                    plugin_name = sanitize_plugin_name(
+                        metadata.get("name", metadata.get("name", "generated_plugin"))
+                    )
+                    if not plugin_name.startswith("astrbot_plugin_"):
+                        plugin_name = f"astrbot_plugin_{plugin_name}"
+                    metadata["name"] = plugin_name
+                    metadata["markdown"] = markdown_doc
+
+                    combined_description = description
+                    if feedback:
+                        combined_description = f"{description}\n\n用户反馈：{feedback}"
+                    config_schema = await self.llm_handler.generate_config_schema(
+                        metadata, combined_description
+                    )
+
+                    # 检查插件是否已存在
+                    if self.directory_detector.check_plugin_exists(plugin_name):
+                        message = f"插件 '{plugin_name}' 已存在"
+                        await event.send(event.plain_result(message))
+                        self.logger.warning(message)
+                        return {"success": False, "error": message}
+
+                    # 显示优化后的方案（仅元数据信息）
+                    await event.send(
+                        event.plain_result(
+                            f"优化后的插件方案：\n\n{self._build_preview_text(metadata, '', '')}"
+                        )
+                    )
+                    await self._send_doc_and_config_images(
+                        event, metadata, markdown_doc, config_schema
+                    )
+                    break
+                except Exception as e:
+                    retry_count_fb += 1
+                    if not unlimited_retry_fb and retry_count_fb > max_retries_fb:
+                        error_msg = f"优化插件失败（已重试{max_retries_fb}次）：{str(e)}"
+                        self.logger.error(error_msg)
+                        return {"success": False, "error": error_msg}
+                    self.logger.warning(f"优化插件失败，重试 {retry_count_fb}/{max_retries_fb}：{str(e)}")
 
         # 继续执行生成流程的剩余步骤
         try:
@@ -899,16 +935,24 @@ class PluginGenerator:
 
             # 步骤4：生成插件代码
             self.logger.info(f"开始生成插件代码: {plugin_name}")
-            try:
-                code = await self.llm_handler.generate_plugin_code(
-                    metadata, markdown_doc, config_schema
-                )
-            except Exception as code_err:
-                error_msg = f"生成插件代码失败：{str(code_err)}"
-                if isinstance(code_err, TimeoutError) or "超时" in str(code_err):
-                    error_msg += "\n提示：可在插件配置中增加 llm_timeout_seconds 的值"
-                self.logger.error(error_msg)
-                return {"success": False, "error": error_msg}
+            max_retries2 = self.config.get("max_retries", 3)
+            unlimited_retry2 = max_retries2 == -1
+            retry_count = 0
+            while True:
+                try:
+                    code = await self.llm_handler.generate_plugin_code(
+                        metadata, markdown_doc, config_schema
+                    )
+                    break
+                except Exception as code_err:
+                    retry_count += 1
+                    if not unlimited_retry2 and retry_count > max_retries2:
+                        error_msg = f"生成插件代码失败（已重试{max_retries2}次）：{str(code_err)}"
+                        if isinstance(code_err, TimeoutError) or "超时" in str(code_err):
+                            error_msg += "\n提示：可在插件配置中增加 llm_timeout_seconds 的值"
+                        self.logger.error(error_msg)
+                        return {"success": False, "error": error_msg}
+                    self.logger.warning(f"生成代码失败，重试 {retry_count}/{max_retries2}：{str(code_err)}")
 
             # 步骤5：代码审查与修复
             self._update_status(5, plugin_name)
