@@ -47,6 +47,12 @@
     "hint": "插件生成失败时的最大重试次数，-1为无限",
     "default": 3
   },
+  "llm_timeout_seconds": {
+    "description": "LLM调用超时时间(秒)",
+    "type": "int",
+    "hint": "LLM调用的最大等待时间。插件生成涉及多次LLM调用，建议设置较大值",
+    "default": 600
+  },
   "enable_function_call": {
     "description": "启用函数调用",
     "type": "bool",

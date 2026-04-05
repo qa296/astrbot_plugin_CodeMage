@@ -3,12 +3,14 @@ CodeMage LLM调用处理器模块
 负责处理与LLM的交互和调用
 """
 
+import asyncio
 import json
 from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.star import Context
-from .utils import extract_code_blocks, parse_json_response, extract_codemage_block
+
+from .utils import extract_code_blocks, extract_codemage_block, parse_json_response
 
 
 class LLMHandler:
@@ -19,6 +21,7 @@ class LLMHandler:
         self.config = config
         self.provider_id = config.get("llm_provider_id")
         self.negative_prompt = config.get("negative_prompt", "")
+        self.timeout_seconds = config.get("llm_timeout_seconds", 600)
         self.logger = logger
         self._dev_docs_cache: str | None = None
 
@@ -52,14 +55,22 @@ class LLMHandler:
 
             # 使用新 API llm_generate
             # 显式传递 contexts=[] 确保生成请求是无状态的，不包含之前的对话历史
-            llm_resp = await self.context.llm_generate(
-                chat_provider_id=self.provider_id,
-                prompt=prompt,
-                system_prompt=full_system_prompt,
-                contexts=[],
-                **extra_kwargs,
+            llm_resp = await asyncio.wait_for(
+                self.context.llm_generate(
+                    chat_provider_id=self.provider_id,
+                    prompt=prompt,
+                    system_prompt=full_system_prompt,
+                    contexts=[],
+                    **extra_kwargs,
+                ),
+                timeout=self.timeout_seconds,
             )
             return llm_resp.completion_text
+
+        except asyncio.TimeoutError:
+            error_msg = f"LLM调用超时（超过{self.timeout_seconds}秒），请尝试增加llm_timeout_seconds配置值"
+            logger.error(error_msg)
+            raise TimeoutError(error_msg)
 
         except Exception as e:
             logger.error(f"LLM调用失败：{str(e)}")
@@ -559,11 +570,11 @@ class LLMHandler:
                 code_content = extract_codemage_block(response, "python")
                 if code_content:
                     return code_content
-                    
+
                 # 如果不是最后一次尝试，修改提示词要求更明确的格式
                 if attempt < max_retries - 1:
                     prompt += "\n\n重要：请确保返回的代码包含在<codemage:python>和</codemage:python>之间，不要包含其他内容。"
-                    
+
             except Exception as e:
                 logger.error(
                     f"修复插件代码失败（尝试 {attempt + 1}/{max_retries}）：{str(e)}"

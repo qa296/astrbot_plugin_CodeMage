@@ -566,6 +566,8 @@ class PluginGenerator:
                 code = await self.llm_handler.generate_plugin_code(metadata, markdown_doc, config_schema)
             except Exception as code_err:
                 error_msg = f"生成插件代码失败：{str(code_err)}"
+                if isinstance(code_err, TimeoutError) or "超时" in str(code_err):
+                    error_msg += "\n提示：可在插件配置中增加 llm_timeout_seconds 的值"
                 self.logger.error(error_msg)
                 return {
                     "success": False,
@@ -807,6 +809,8 @@ class PluginGenerator:
                 code = await self.llm_handler.generate_plugin_code(metadata, markdown_doc, config_schema)
             except Exception as code_err:
                 error_msg = f"生成插件代码失败：{str(code_err)}"
+                if isinstance(code_err, TimeoutError) or "超时" in str(code_err):
+                    error_msg += "\n提示：可在插件配置中增加 llm_timeout_seconds 的值"
                 self.logger.error(error_msg)
                 return {
                     "success": False,
