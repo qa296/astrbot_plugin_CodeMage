@@ -21,7 +21,7 @@ from .utils import validate_plugin_description
     "astrbot_plugin_codemage",
     "qa296",
     "一个基于AI的 AstrBot 插件生成器，可以根据自然语言描述自动生成完整的 AstrBot 插件。",
-    "1.2.2",
+    "1.2.8",
     "https://github.com/qa296/astrbot_plugin_codemage",
 )
 class CodeMagePlugin(Star):
@@ -371,6 +371,139 @@ class CodeMagePlugin(Star):
         except Exception as e:
             self.logger.error(f"修改插件内容过程中发生错误: {str(e)}")
             yield event.plain_result(f"修改失败：{str(e)}")
+
+    @filter.command("继续生成", alias={"resume", "continue"})
+    async def resume_generation(self, event: AstrMessageEvent):
+        """恢复挂起的插件生成任务
+
+        用法：
+          /继续生成            - 自动恢复唯一挂起任务，或列出多个供选择
+          /继续生成 插件名     - 恢复指定插件名的挂起任务
+        """
+        if not self._check_admin_permission(event):
+            yield event.plain_result("仅管理员可以使用此功能")
+            return
+
+        args_text = self._get_message_after_command(event)
+        target_name = args_text.strip() if args_text else ""
+
+        try:
+            suspended_tasks = await self.plugin_generator._list_suspended()
+
+            if not suspended_tasks:
+                yield event.plain_result("当前没有挂起的任务")
+                return
+
+            if not target_name:
+                if len(suspended_tasks) == 1:
+                    target_name = suspended_tasks[0].get("plugin_name", "")
+                else:
+                    lines = ["当前有多个挂起任务，请指定插件名：\n"]
+                    step_names = [
+                        "生成元数据", "生成文档", "生成配置",
+                        "生成代码", "代码审查", "安装验证",
+                    ]
+                    for t in suspended_tasks:
+                        s = t.get("failed_step", 0)
+                        s_desc = step_names[s - 1] if 1 <= s <= 6 else f"步骤{s}"
+                        ts = t.get("timestamp", "未知时间")
+                        lines.append(
+                            f"  - {t.get('plugin_name', '?')} "
+                            f"[{s_desc}] ({ts})"
+                        )
+                    lines.append("\n使用 /继续生成 <插件名> 恢复指定任务")
+                    yield event.plain_result("\n".join(lines))
+                    return
+
+            yield event.plain_result(f"正在恢复挂起任务：{target_name}...")
+            result = await self.plugin_generator.resume_suspended_task(target_name, event)
+
+            if result.get("success"):
+                message = f"插件生成成功！\n插件名称：{result['plugin_name']}"
+                if result.get("installed"):
+                    message += f"\n安装状态：{'已安装' if result.get('install_success') else '安装失败'}"
+                    if not result.get("install_success"):
+                        message += f"\n安装错误：{result.get('install_error', '未知错误')}"
+                yield event.plain_result(message)
+            elif result.get("pending_confirmation"):
+                pass
+            elif result.get("suspended"):
+                pass
+            else:
+                yield event.plain_result(f"恢复失败：{result.get('error', '未知错误')}")
+
+        except Exception as e:
+            self.logger.error(f"恢复挂起任务时发生错误: {str(e)}")
+            yield event.plain_result(f"恢复失败：{str(e)}")
+
+    @filter.command("放弃挂起", alias={"abandon_suspended", "cancel_suspended"})
+    async def abandon_suspended(self, event: AstrMessageEvent):
+        """放弃指定的挂起任务
+
+        用法：/放弃挂起 插件名
+        """
+        if not self._check_admin_permission(event):
+            yield event.plain_result("仅管理员可以使用此功能")
+            return
+
+        args_text = self._get_message_after_command(event)
+        target_name = args_text.strip() if args_text else ""
+
+        if not target_name:
+            yield event.plain_result("请指定要放弃的任务名，例如：/放弃挂起 astrbot_plugin_weather\n使用 /挂起任务 查看所有挂起任务")
+            return
+
+        try:
+            task = await self.plugin_generator._load_suspended(target_name)
+            if not task:
+                yield event.plain_result(f"未找到挂起的任务：{target_name}")
+                return
+
+            await self.plugin_generator._delete_suspended(target_name)
+            yield event.plain_result(f"已放弃挂起任务：{target_name}")
+
+        except Exception as e:
+            self.logger.error(f"放弃挂起任务时发生错误: {str(e)}")
+            yield event.plain_result(f"操作失败：{str(e)}")
+
+    @filter.command("挂起任务", alias={"suspended_tasks", "挂起列表"})
+    async def list_suspended_tasks(self, event: AstrMessageEvent):
+        """查看所有挂起的插件生成任务"""
+        if not self._check_admin_permission(event):
+            yield event.plain_result("仅管理员可以使用此功能")
+            return
+
+        try:
+            suspended_tasks = await self.plugin_generator._list_suspended()
+
+            if not suspended_tasks:
+                yield event.plain_result("当前没有挂起的任务")
+                return
+
+            step_names = [
+                "生成元数据", "生成文档", "生成配置",
+                "生成代码", "代码审查", "安装验证",
+            ]
+            lines = [f"当前有 {len(suspended_tasks)} 个挂起任务：\n"]
+            for t in suspended_tasks:
+                s = t.get("failed_step", 0)
+                s_desc = step_names[s - 1] if 1 <= s <= 6 else f"步骤{s}"
+                ts = t.get("timestamp", "未知时间")
+                desc = t.get("description", "")[:40]
+                err = t.get("error_message", "")[:60]
+                lines.append(
+                    f"【{t.get('plugin_name', '?')}】\n"
+                    f"  失败步骤：{s_desc}\n"
+                    f"  描述：{desc}\n"
+                    f"  错误：{err}\n"
+                    f"  挂起时间：{ts}\n"
+                    f"  恢复指令：/继续生成 {t.get('plugin_name', '')}\n"
+                )
+            yield event.plain_result("\n".join(lines))
+
+        except Exception as e:
+            self.logger.error(f"查看挂起任务时发生错误: {str(e)}")
+            yield event.plain_result(f"查询失败：{str(e)}")
 
     async def terminate(self):
         """插件卸载时调用"""
