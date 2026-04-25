@@ -244,7 +244,7 @@ class PluginGenerator:
     async def _load_suspended(self, plugin_name: str) -> dict | None:
         try:
             key = f"codemage:suspended:{plugin_name}"
-            data = await self.star.get_kv_data(key)
+            data = await self.star.get_kv_data(key, None)
             if data is None:
                 self.logger.debug(f"KV中未找到挂起任务: {key}")
             return data
