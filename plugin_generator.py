@@ -1313,7 +1313,6 @@ class PluginGenerator:
             # --- Step 2 ---
             if step <= 2:
                 self._update_status(2, plugin_name)
-                await event.send(event.plain_result("正在恢复：重新生成文档..."))
                 retry_count = 0
                 while True:
                     try:
@@ -1343,7 +1342,6 @@ class PluginGenerator:
             # --- Step 3 ---
             if step <= 3:
                 self._update_status(3, plugin_name)
-                await event.send(event.plain_result("正在恢复：重新生成配置..."))
                 retry_count = 0
                 while True:
                     try:
@@ -1399,7 +1397,6 @@ class PluginGenerator:
             # --- Step 4 ---
             if step <= 4:
                 self._update_status(4, plugin_name)
-                await event.send(event.plain_result("正在恢复：重新生成插件代码..."))
                 retry_count = 0
                 while True:
                     try:
@@ -1428,7 +1425,6 @@ class PluginGenerator:
             # --- Step 5 ---
             if step <= 5:
                 self._update_status(5, plugin_name)
-                await event.send(event.plain_result("正在恢复：代码审查与修复..."))
 
                 review_result = self._normalize_review_result(
                     await self._review_code_with_retry(code, metadata, markdown_doc)
@@ -1501,7 +1497,6 @@ class PluginGenerator:
             }
 
             if self.installer and self.config.get("api_password_md5"):
-                await event.send(event.plain_result("正在恢复：安装插件..."))
                 install_result = await self._install_with_auto_retry(
                     plugin_name, metadata, code, markdown_doc, config_schema, event
                 )
