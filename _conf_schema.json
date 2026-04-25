@@ -68,7 +68,7 @@
   "install_method": {
     "description": "插件安装方式",
     "type": "string",
-    "hint": "选择通过AstrBot API安装，或直接将文件放入本地插件目录。选择API需要正确配置用户名与MD5密码。",
+    "hint": "选择通过AstrBot API安装，或直接将文件放入本地插件目录。选择API需要正确配置用户名与MD5密码。file方式适用于无法使用API的环境，但无法自动安装，可能需要重启。",
     "options": ["auto", "api", "file"],
     "default": "auto"
   },
