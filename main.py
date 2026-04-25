@@ -21,7 +21,7 @@ from .utils import validate_plugin_description
     "astrbot_plugin_codemage",
     "qa296",
     "一个基于AI的 AstrBot 插件生成器，可以根据自然语言描述自动生成完整的 AstrBot 插件。",
-    "1.2.8",
+    "1.3.9",
     "https://github.com/qa296/astrbot_plugin_codemage",
 )
 class CodeMagePlugin(Star):

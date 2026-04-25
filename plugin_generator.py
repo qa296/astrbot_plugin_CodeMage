@@ -200,11 +200,6 @@ class PluginGenerator:
         result["suggestions"] = suggestions
         return result
 
-    def _generate_task_key(self, plugin_name: str = "", description: str = "") -> str:
-        if plugin_name and plugin_name not in ("", "unknown"):
-            return plugin_name
-        return f"pending_{int(time.time() * 1000)}"
-
     async def _suspend_task(
         self,
         step: int,
@@ -599,16 +594,7 @@ class PluginGenerator:
                     if not unlimited_retry and retry_count > max_retries:
                         error_msg = f"生成插件失败（已重试{max_retries}次）：{str(generate_err)}"
                         self.logger.error(error_msg)
-                        task_key = self._generate_task_key(description=description)
-                        await self._suspend_task(
-                            step=1, error_message=error_msg, retry_count=retry_count,
-                            plugin_name=task_key, description=description,
-                            umo=getattr(event, "unified_msg_origin", ""),
-                        )
-                        await event.send(event.plain_result(
-                            f"生成元数据重试耗尽，任务已挂起。\n使用 /挂起任务 查看，/继续生成 {task_key} 恢复。"
-                        ))
-                        return {"success": False, "error": error_msg, "suspended": True}
+                        return {"success": False, "error": error_msg}
                     self.logger.warning(f"生成失败，重试 {retry_count}/{max_retries}：{str(generate_err)}")
 
             if not isinstance(metadata, dict):
@@ -1237,7 +1223,7 @@ class PluginGenerator:
         """从挂起状态恢复任务，从断点继续执行
 
         Args:
-            task_key: 挂起任务的标识（plugin_name 或 pending_xxx）
+            task_key: 挂起任务的标识（plugin_name）
             event: 当前消息事件
 
         Returns:
@@ -1250,7 +1236,14 @@ class PluginGenerator:
         if not task:
             return {"success": False, "error": f"未找到挂起的任务：{task_key}"}
 
-        step = task.get("failed_step", 1)
+        step = task.get("failed_step", 2)
+        if step < 2:
+            await self._delete_suspended(task_key)
+            return {
+                "success": False,
+                "error": f"任务 {task_key} 在第一阶段生成失败，无法恢复。请使用 /生成插件 重新开始。",
+            }
+
         description = task.get("description", "")
         metadata = task.get("metadata", {})
         markdown_doc = task.get("markdown", "")
@@ -1268,46 +1261,6 @@ class PluginGenerator:
             step_by_step = self.config.get("step_by_step", True)
             max_retries = self.config.get("max_retries", 3)
             unlimited_retry = max_retries == -1
-
-            # --- Step 1 ---
-            if step <= 1:
-                self._update_status(1)
-                await event.send(event.plain_result("正在恢复：重新生成插件元数据..."))
-                retry_count = 0
-                metadata = {}
-                while True:
-                    try:
-                        if step_by_step:
-                            metadata = await self.llm_handler.generate_metadata_structure(description)
-                        else:
-                            metadata = await self.llm_handler.generate_plugin_metadata(description)
-                            markdown_doc = metadata.get("markdown", "")
-                        break
-                    except Exception as e:
-                        retry_count += 1
-                        if not unlimited_retry and retry_count > max_retries:
-                            error_msg = f"恢复失败（已重试{max_retries}次）：{str(e)}"
-                            self.logger.error(error_msg)
-                            await self._suspend_task(
-                                step=1, error_message=error_msg, retry_count=retry_count,
-                                plugin_name=task_key, description=description,
-                                umo=getattr(event, "unified_msg_origin", ""),
-                            )
-                            return {"success": False, "error": error_msg, "suspended": True}
-                        self.logger.warning(f"恢复失败，重试 {retry_count}/{max_retries}：{str(e)}")
-
-                if not isinstance(metadata, dict):
-                    return {"success": False, "error": "LLM返回的插件元数据格式不正确"}
-                metadata.setdefault("metadata", {})
-                metadata.setdefault("commands", [])
-                plugin_name = sanitize_plugin_name(metadata.get("name", "astrbot_plugin_generated"))
-                if not plugin_name.startswith("astrbot_plugin_"):
-                    plugin_name = f"astrbot_plugin_{plugin_name}"
-                metadata["name"] = plugin_name
-                self._update_status(1, plugin_name)
-
-                if self.directory_detector.check_plugin_exists(plugin_name):
-                    return {"success": False, "error": f"插件 '{plugin_name}' 已存在"}
 
             # --- Step 2 ---
             if step <= 2:
