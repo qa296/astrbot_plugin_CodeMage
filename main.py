@@ -167,7 +167,8 @@ class CodeMagePlugin(Star):
             else:
                 # 检查是否是等待用户确认的情况
                 if result.get("pending_confirmation"):
-                    # 不显示"插件生成失败"消息，因为这是正常的等待确认流程
+                    pass
+                elif result.get("suspended"):
                     pass
                 else:
                     yield event.plain_result(f"插件生成失败：{result['error']}")
@@ -280,7 +281,9 @@ class CodeMagePlugin(Star):
                         )
                 yield event.plain_result(message)
             else:
-                if not result.get("pending_confirmation"):
+                if result.get("suspended"):
+                    pass
+                elif not result.get("pending_confirmation"):
                     yield event.plain_result(f"插件生成失败：{result['error']}")
                 # 如果是pending_confirmation状态，不显示错误消息，因为这是正常的等待确认流程
         except Exception as e:
