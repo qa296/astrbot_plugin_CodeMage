@@ -116,3 +116,7 @@ git clone https://github.com/qa296/astrbot_plugin_codemage.git
 ## 贡献
 
 欢迎提交 Issue 和 Pull Request 来改进这个项目！
+
+## QQ群
+因为作者并不经常看issue，所以可以通过QQ群来提醒我！
+群号：1098607348
