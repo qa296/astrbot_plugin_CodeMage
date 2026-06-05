@@ -24,7 +24,18 @@ class PluginInstaller:
         # 配置文件中存储的是MD5加密后的密码
         self.password_md5 = config.get("api_password_md5", "")
         self.token = None
-        self.max_retries = config.get("max_retries", 3)  # 新增：最大重试次数
+        self.max_retries = config.get("max_retries", 3)
+        self._install_timestamp: float | None = None
+
+    def set_install_timestamp(self, timestamp: float | None = None):
+        """设置安装参考时间戳，用于时间窗日志过滤
+
+        Args:
+            timestamp: Unix时间戳，不传则使用当前时间
+        """
+        import time
+
+        self._install_timestamp = timestamp or time.time()
 
     async def login(self) -> bool:
         """登录AstrBot并获取token
@@ -279,8 +290,87 @@ class PluginInstaller:
         file_result = await self.uninstall_plugin_file(plugin_name)
         return file_result
 
+    async def _check_plugin_loaded_via_api(self, plugin_name: str) -> dict:
+        """通过 AstrBot API 检查插件是否已加载
+
+        Args:
+            plugin_name: 插件名称
+
+        Returns:
+            dict: {
+                "success": bool,      # API调用是否成功
+                "loaded": bool,       # 插件是否已加载
+                "activated": bool,    # 插件是否已激活（仅在loaded=True时有效）
+                "error": str,         # 错误信息（仅在loaded=False时）
+            }
+        """
+        if not self.token:
+            if not await self.login():
+                return {"success": False, "error": "API登录失败"}
+
+        try:
+            import aiohttp
+
+            headers = {"Authorization": f"Bearer {self.token}"}
+
+            # 1. 从已加载插件列表检查
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.astrbot_url}/api/plugin/get?name={plugin_name}"
+                async with session.get(url, headers=headers) as resp:
+                    result = await resp.json()
+                    if result.get("status") == "ok":
+                        plugins = result.get("data", [])
+                        if plugins:
+                            p = plugins[0]
+                            return {
+                                "success": True,
+                                "loaded": True,
+                                "activated": p.get("activated", True),
+                                "version": p.get("version", ""),
+                                "author": p.get("author", ""),
+                                "desc": p.get("desc", ""),
+                            }
+
+            # 2. 不在已加载列表 → 检查失败插件列表
+            async with aiohttp.ClientSession() as session:
+                url = f"{self.astrbot_url}/api/plugin/source/get-failed-plugins"
+                async with session.get(url, headers=headers) as resp:
+                    result = await resp.json()
+                    if result.get("status") == "ok":
+                        failed_dict = result.get("data", {})
+                        for dir_name, err_info in failed_dict.items():
+                            if plugin_name in dir_name or (
+                                isinstance(err_info, dict)
+                                and plugin_name in str(err_info.get("name", ""))
+                            ):
+                                err_msg = (
+                                    err_info.get("error", str(err_info))
+                                    if isinstance(err_info, dict)
+                                    else str(err_info)
+                                )
+                                return {
+                                    "success": True,
+                                    "loaded": False,
+                                    "error": err_msg,
+                                }
+
+            # 3. 两处都找不到 → 未加载
+            return {
+                "success": True,
+                "loaded": False,
+                "error": f"插件 {plugin_name} 未在 AstrBot 中找到，可能安装后未能正确加载。",
+            }
+
+        except Exception as e:
+            self.logger.error(f"检查插件加载状态失败: {str(e)}")
+            return {"success": False, "error": str(e)}
+
     async def check_plugin_install_status(self, plugin_name: str) -> dict[str, Any]:
-        """检查插件安装状态和错误日志
+        """检查插件安装状态和运行时错误
+
+        两层检测策略：
+        1. 优先使用 API 确认插件是否加载成功（权威检测）
+        2. 使用时间窗过滤的日志检测运行时错误
 
         Args:
             plugin_name: 插件名称
@@ -288,104 +378,94 @@ class PluginInstaller:
         Returns:
             Dict[str, Any]: 插件状态信息
         """
-        if not self.token:
-            if not await self.login():
-                return {"success": False, "error": "API登录失败"}
+        # Layer 1: 通过插件列表 API 确认加载状态
+        load_check = await self._check_plugin_loaded_via_api(plugin_name)
+        if not load_check.get("success"):
+            return {
+                "success": False,
+                "error": load_check.get("error", "API登录失败"),
+            }
+
+        result: dict[str, Any] = {
+            "success": True,
+            "has_errors": False,
+            "has_warnings": False,
+            "error_logs": [],
+            "warning_logs": [],
+        }
+
+        if not load_check.get("loaded"):
+            result["has_errors"] = True
+            result["error_logs"] = [
+                f"插件 {plugin_name} 加载失败: {load_check.get('error', '未知错误')}"
+            ]
+            self.logger.warning(f"插件 {plugin_name} 未加载: {load_check.get('error')}")
+            return result
+
+        result["loaded"] = True
+        result["activated"] = load_check.get("activated", True)
+
+        if not load_check.get("activated", True):
+            self.logger.warning(f"插件 {plugin_name} 已加载但未激活")
+
+        # Layer 2: 时间窗日志检测运行时错误
+        if not self._install_timestamp:
+            return result
 
         try:
             import asyncio
 
             import aiohttp
 
-            # 等待插件加载
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
 
-            # 获取日志历史
-            url = f"{self.astrbot_url}/api/log-history?limit=200"
             headers = {"Authorization": f"Bearer {self.token}"}
-
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers) as resp:
-                    result = await resp.json()
+                async with session.get(
+                    f"{self.astrbot_url}/api/log-history", headers=headers
+                ) as resp:
+                    api_result = await resp.json()
+                    if api_result.get("status") != "ok":
+                        return result
 
-                    if result.get("status") == "ok":
-                        logs = result.get("data", {}).get("logs", [])
+                    logs = api_result.get("data", {}).get("logs", [])
+                    error_logs = []
+                    warning_logs = []
 
-                        # 查找插件相关的错误和警告
-                        error_logs = []
-                        warning_logs = []
+                    for entry in logs:
+                        if not isinstance(entry, dict):
+                            continue
 
-                        # 错误类型关键词
-                        error_keywords = [
-                            "ImportError",
-                            "ModuleNotFoundError",
-                            "SyntaxError",
-                            "IndentationError",
-                            "NameError",
-                            "TypeError",
-                            "ValueError",
-                            "AttributeError",
-                            "导入失败",
-                            "加载失败",
-                            "安装失败",
-                            "依赖缺失",
-                        ]
+                        log_time = entry.get("time", 0)
+                        if log_time < self._install_timestamp:
+                            continue
 
-                        for log_entry in logs:
-                            if not isinstance(log_entry, dict):
-                                continue
+                        level = entry.get("level", "").upper()
+                        data = entry.get("data", "")
 
-                            data = log_entry.get("data", {})
-                            if isinstance(data, str):
-                                message = data
-                                level = log_entry.get("level", "").upper()
-                                module = ""
-                            else:
-                                level = data.get(
-                                    "level", log_entry.get("level", "")
-                                ).upper()
-                                message = data.get("message", "")
-                                module = data.get("module", data.get("name", ""))
+                        if isinstance(data, dict):
+                            message = data.get("message", "")
+                        else:
+                            message = str(data)
 
-                            # 检查是否与插件相关
-                            is_plugin_related = (
-                                "plugin" in module.lower()
-                                or "star" in module.lower()
-                                or plugin_name.lower() in message.lower()
-                                or plugin_name.lower() in module.lower()
-                            )
+                        # 精确插件名匹配
+                        # 插件名如 astrbot_plugin_xxx 足够长且唯一，配以时间窗过滤即可精准匹配
+                        plugin_matches = plugin_name in message
 
-                            if is_plugin_related:
-                                if (
-                                    level in ["ERROR", "ERRO"]
-                                    or "error" in message.lower()
-                                    or "失败" in message
-                                ):
-                                    # 进一步确认是否是真正的错误
-                                    is_real_error = False
-                                    if level in ["ERROR", "ERRO"]:
-                                        is_real_error = True
-                                    elif any(k in message for k in error_keywords):
-                                        is_real_error = True
+                        if not plugin_matches:
+                            continue
 
-                                    if is_real_error:
-                                        error_logs.append(message)
-                                elif level == "WARN" or "warn" in message.lower():
-                                    warning_logs.append(message)
+                        if level == "ERROR":
+                            error_logs.append(message)
+                        elif level == "WARNING":
+                            warning_logs.append(message)
 
-                        return {
-                            "success": True,
-                            "has_errors": len(error_logs) > 0,
-                            "has_warnings": len(warning_logs) > 0,
-                            "error_logs": error_logs[:5],  # 最多返回5条
-                            "warning_logs": warning_logs[:5],
-                        }
-                    else:
-                        return {
-                            "success": False,
-                            "error": f"获取日志失败: {result.get('message')}",
-                        }
+                    result["has_errors"] = len(error_logs) > 0
+                    result["has_warnings"] = len(warning_logs) > 0
+                    result["error_logs"] = error_logs[:5]
+                    result["warning_logs"] = warning_logs[:5]
 
         except Exception as e:
-            self.logger.error(f"检查插件状态失败: {str(e)}")
-            return {"success": False, "error": str(e)}
+            self.logger.warning(f"日志检查失败（非关键）: {str(e)}")
+
+        return result

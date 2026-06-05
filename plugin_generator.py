@@ -1612,7 +1612,9 @@ class PluginGenerator:
                 if not zip_path:
                     return {"success": False, "error": "插件打包失败"}
 
-                # 3. 安装插件
+                # 3. 安装前记录时间戳，用于后续日志时间窗过滤
+                self.installer.set_install_timestamp()
+
                 if current_retry > 0:
                     await event.send(
                         event.plain_result(
