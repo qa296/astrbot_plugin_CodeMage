@@ -169,7 +169,11 @@ class PluginGenerator:
             approved = result.get("是否同意") or result.get("agree")
         if isinstance(approved, str):
             approved = approved.strip().lower() in {
-                "true", "yes", "同意", "通过", "approved",
+                "true",
+                "yes",
+                "同意",
+                "通过",
+                "approved",
             }
         result["approved"] = bool(approved)
         satisfaction = result.get("satisfaction_score")
@@ -371,9 +375,7 @@ class PluginGenerator:
         """从 _conf_schema.json 的 schema 构建人类可读的表格行"""
         rows: list[dict[str, str]] = []
 
-        def walk(
-            item_key: str, item: dict[str, Any], parent_label: str | None = None
-        ):
+        def walk(item_key: str, item: dict[str, Any], parent_label: str | None = None):
             desc = item.get("description") or item_key
             name_label = f"{parent_label} > {desc}" if parent_label else desc
             hint = item.get("hint")
@@ -603,7 +605,9 @@ class PluginGenerator:
                         error_msg = f"生成插件失败（已重试{max_retries}次）：{str(generate_err)}"
                         self.logger.error(error_msg)
                         return {"success": False, "error": error_msg}
-                    self.logger.warning(f"生成失败，重试 {retry_count}/{max_retries}：{str(generate_err)}")
+                    self.logger.warning(
+                        f"生成失败，重试 {retry_count}/{max_retries}：{str(generate_err)}"
+                    )
 
             if not isinstance(metadata, dict):
                 error_msg = "LLM返回的插件元数据格式不正确"
@@ -633,31 +637,46 @@ class PluginGenerator:
             while True:
                 try:
                     if step_by_step or not markdown_doc:
-                        markdown_doc = await self.llm_handler.generate_markdown_document(
-                            metadata, description
+                        markdown_doc = (
+                            await self.llm_handler.generate_markdown_document(
+                                metadata, description
+                            )
                         )
                     break
                 except Exception as doc_err:
                     retry_count += 1
                     if not unlimited_retry and retry_count > max_retries:
-                        error_msg = f"生成插件失败（已重试{max_retries}次）：{str(doc_err)}"
+                        error_msg = (
+                            f"生成插件失败（已重试{max_retries}次）：{str(doc_err)}"
+                        )
                         self.logger.error(error_msg)
                         if await self._suspend_task(
-                            step=2, error_message=error_msg, retry_count=retry_count,
-                            plugin_name=plugin_name, description=description,
+                            step=2,
+                            error_message=error_msg,
+                            retry_count=retry_count,
+                            plugin_name=plugin_name,
+                            description=description,
                             metadata=metadata,
                             umo=getattr(event, "unified_msg_origin", ""),
                         ):
-                            await event.send(event.plain_result(
-                                f"生成文档重试耗尽，任务已挂起。\n使用 /继续生成 {plugin_name} 恢复。"
-                            ))
-                            return {"success": False, "error": error_msg, "suspended": True}
+                            await event.send(
+                                event.plain_result(
+                                    f"生成文档重试耗尽，任务已挂起。\n使用 /继续生成 {plugin_name} 恢复。"
+                                )
+                            )
+                            return {
+                                "success": False,
+                                "error": error_msg,
+                                "suspended": True,
+                            }
                         else:
-                            await event.send(event.plain_result(
-                                f"任务挂起失败：{error_msg}"
-                            ))
+                            await event.send(
+                                event.plain_result(f"任务挂起失败：{error_msg}")
+                            )
                             return {"success": False, "error": error_msg}
-                    self.logger.warning(f"生成失败，重试 {retry_count}/{max_retries}：{str(doc_err)}")
+                    self.logger.warning(
+                        f"生成失败，重试 {retry_count}/{max_retries}：{str(doc_err)}"
+                    )
             metadata["markdown"] = markdown_doc
 
             # 步骤3：生成配置文件
@@ -673,24 +692,38 @@ class PluginGenerator:
                 except Exception as config_err:
                     retry_count += 1
                     if not unlimited_retry and retry_count > max_retries:
-                        error_msg = f"生成插件失败（已重试{max_retries}次）：{str(config_err)}"
+                        error_msg = (
+                            f"生成插件失败（已重试{max_retries}次）：{str(config_err)}"
+                        )
                         self.logger.error(error_msg)
                         if await self._suspend_task(
-                            step=3, error_message=error_msg, retry_count=retry_count,
-                            plugin_name=plugin_name, description=description,
-                            metadata=metadata, markdown=markdown_doc,
+                            step=3,
+                            error_message=error_msg,
+                            retry_count=retry_count,
+                            plugin_name=plugin_name,
+                            description=description,
+                            metadata=metadata,
+                            markdown=markdown_doc,
                             umo=getattr(event, "unified_msg_origin", ""),
                         ):
-                            await event.send(event.plain_result(
-                                f"生成配置重试耗尽，任务已挂起。\n使用 /继续生成 {plugin_name} 恢复。"
-                            ))
-                            return {"success": False, "error": error_msg, "suspended": True}
+                            await event.send(
+                                event.plain_result(
+                                    f"生成配置重试耗尽，任务已挂起。\n使用 /继续生成 {plugin_name} 恢复。"
+                                )
+                            )
+                            return {
+                                "success": False,
+                                "error": error_msg,
+                                "suspended": True,
+                            }
                         else:
-                            await event.send(event.plain_result(
-                                f"任务挂起失败：{error_msg}"
-                            ))
+                            await event.send(
+                                event.plain_result(f"任务挂起失败：{error_msg}")
+                            )
                             return {"success": False, "error": error_msg}
-                    self.logger.warning(f"生成失败，重试 {retry_count}/{max_retries}：{str(config_err)}")
+                    self.logger.warning(
+                        f"生成失败，重试 {retry_count}/{max_retries}：{str(config_err)}"
+                    )
 
             # 显示初步生成的插件方案（仅元数据信息） - 仅在非自动批准模式下显示
             if not self.config.get("auto_approve", False):
@@ -750,26 +783,42 @@ class PluginGenerator:
                     retry_count += 1
                     if not unlimited_retry and retry_count > max_retries:
                         error_msg = f"生成插件代码失败（已重试{max_retries}次）：{str(code_err)}"
-                        if isinstance(code_err, TimeoutError) or "超时" in str(code_err):
-                            error_msg += "\n提示：可在插件配置中增加 llm_timeout_seconds 的值"
+                        if isinstance(code_err, TimeoutError) or "超时" in str(
+                            code_err
+                        ):
+                            error_msg += (
+                                "\n提示：可在插件配置中增加 llm_timeout_seconds 的值"
+                            )
                         self.logger.error(error_msg)
                         if await self._suspend_task(
-                            step=4, error_message=error_msg, retry_count=retry_count,
-                            plugin_name=plugin_name, description=description,
-                            metadata=metadata, markdown=markdown_doc,
+                            step=4,
+                            error_message=error_msg,
+                            retry_count=retry_count,
+                            plugin_name=plugin_name,
+                            description=description,
+                            metadata=metadata,
+                            markdown=markdown_doc,
                             config_schema=config_schema,
                             umo=getattr(event, "unified_msg_origin", ""),
                         ):
-                            await event.send(event.plain_result(
-                                f"生成代码重试耗尽，任务已挂起。\n使用 /继续生成 {plugin_name} 恢复。"
-                            ))
-                            return {"success": False, "error": error_msg, "suspended": True}
+                            await event.send(
+                                event.plain_result(
+                                    f"生成代码重试耗尽，任务已挂起。\n使用 /继续生成 {plugin_name} 恢复。"
+                                )
+                            )
+                            return {
+                                "success": False,
+                                "error": error_msg,
+                                "suspended": True,
+                            }
                         else:
-                            await event.send(event.plain_result(
-                                f"任务挂起失败：{error_msg}"
-                            ))
+                            await event.send(
+                                event.plain_result(f"任务挂起失败：{error_msg}")
+                            )
                             return {"success": False, "error": error_msg}
-                    self.logger.warning(f"生成代码失败，重试 {retry_count}/{max_retries}：{str(code_err)}")
+                    self.logger.warning(
+                        f"生成代码失败，重试 {retry_count}/{max_retries}：{str(code_err)}"
+                    )
 
             # 步骤5：代码审查与修复
             self._update_status(5, plugin_name)
@@ -815,21 +864,26 @@ class PluginGenerator:
                 reason = review_result.get("reason", "代码审查未通过")
                 error_msg = f"代码审查未通过：{reason}"
                 if await self._suspend_task(
-                    step=5, error_message=error_msg, retry_count=retry_count,
-                    plugin_name=plugin_name, description=description,
-                    metadata=metadata, markdown=markdown_doc,
-                    config_schema=config_schema, code=code,
+                    step=5,
+                    error_message=error_msg,
+                    retry_count=retry_count,
+                    plugin_name=plugin_name,
+                    description=description,
+                    metadata=metadata,
+                    markdown=markdown_doc,
+                    config_schema=config_schema,
+                    code=code,
                     review_result=review_result,
                     umo=getattr(event, "unified_msg_origin", ""),
                 ):
-                    await event.send(event.plain_result(
-                        f"代码审查重试耗尽，任务已挂起。\n使用 /继续生成 {plugin_name} 恢复。"
-                    ))
+                    await event.send(
+                        event.plain_result(
+                            f"代码审查重试耗尽，任务已挂起。\n使用 /继续生成 {plugin_name} 恢复。"
+                        )
+                    )
                     return {"success": False, "error": error_msg, "suspended": True}
                 else:
-                    await event.send(event.plain_result(
-                        f"任务挂起失败：{error_msg}"
-                    ))
+                    await event.send(event.plain_result(f"任务挂起失败：{error_msg}"))
                     return {"success": False, "error": error_msg}
 
             # 跳过代码审查通过的消息输出
@@ -860,22 +914,34 @@ class PluginGenerator:
                         error_logs = install_result.get("runtime_errors", [])
                         current_code = install_result.get("current_code", code)
                         if await self._suspend_task(
-                            step=6, error_message="\n".join(error_logs),
+                            step=6,
+                            error_message="\n".join(error_logs),
                             retry_count=0,
-                            plugin_name=plugin_name, description=description,
-                            metadata=metadata, markdown=markdown_doc,
-                            config_schema=config_schema, code=current_code,
+                            plugin_name=plugin_name,
+                            description=description,
+                            metadata=metadata,
+                            markdown=markdown_doc,
+                            config_schema=config_schema,
+                            code=current_code,
                             review_result=review_result,
                             umo=getattr(event, "unified_msg_origin", ""),
                         ):
-                            await event.send(event.plain_result(
-                                f"安装验证检测到运行时错误，任务已挂起。\n使用 /继续生成 {plugin_name} 恢复。"
-                            ))
-                            return {"success": False, "error": "安装后运行时错误", "suspended": True}
+                            await event.send(
+                                event.plain_result(
+                                    f"安装验证检测到运行时错误，任务已挂起。\n使用 /继续生成 {plugin_name} 恢复。"
+                                )
+                            )
+                            return {
+                                "success": False,
+                                "error": "安装后运行时错误",
+                                "suspended": True,
+                            }
                         else:
-                            await event.send(event.plain_result(
-                                "任务挂起失败：" + "\n".join(error_logs)
-                            ))
+                            await event.send(
+                                event.plain_result(
+                                    "任务挂起失败：" + "\n".join(error_logs)
+                                )
+                            )
                             return {"success": False, "error": "\n".join(error_logs)}
                     else:
                         await event.send(
@@ -1043,10 +1109,14 @@ class PluginGenerator:
                 except Exception as e:
                     retry_count_fb += 1
                     if not unlimited_retry_fb and retry_count_fb > max_retries_fb:
-                        error_msg = f"优化插件失败（已重试{max_retries_fb}次）：{str(e)}"
+                        error_msg = (
+                            f"优化插件失败（已重试{max_retries_fb}次）：{str(e)}"
+                        )
                         self.logger.error(error_msg)
                         return {"success": False, "error": error_msg}
-                    self.logger.warning(f"优化插件失败，重试 {retry_count_fb}/{max_retries_fb}：{str(e)}")
+                    self.logger.warning(
+                        f"优化插件失败，重试 {retry_count_fb}/{max_retries_fb}：{str(e)}"
+                    )
 
         # 继续执行生成流程的剩余步骤
         try:
@@ -1096,26 +1166,42 @@ class PluginGenerator:
                     retry_count += 1
                     if not unlimited_retry2 and retry_count > max_retries2:
                         error_msg = f"生成插件代码失败（已重试{max_retries2}次）：{str(code_err)}"
-                        if isinstance(code_err, TimeoutError) or "超时" in str(code_err):
-                            error_msg += "\n提示：可在插件配置中增加 llm_timeout_seconds 的值"
+                        if isinstance(code_err, TimeoutError) or "超时" in str(
+                            code_err
+                        ):
+                            error_msg += (
+                                "\n提示：可在插件配置中增加 llm_timeout_seconds 的值"
+                            )
                         self.logger.error(error_msg)
                         if await self._suspend_task(
-                            step=4, error_message=error_msg, retry_count=retry_count,
-                            plugin_name=plugin_name, description=description,
-                            metadata=metadata, markdown=markdown_doc,
+                            step=4,
+                            error_message=error_msg,
+                            retry_count=retry_count,
+                            plugin_name=plugin_name,
+                            description=description,
+                            metadata=metadata,
+                            markdown=markdown_doc,
                             config_schema=config_schema,
                             umo=getattr(event, "unified_msg_origin", ""),
                         ):
-                            await event.send(event.plain_result(
-                                f"生成代码重试耗尽，任务已挂起。\n使用 /继续生成 {plugin_name} 恢复。"
-                            ))
-                            return {"success": False, "error": error_msg, "suspended": True}
+                            await event.send(
+                                event.plain_result(
+                                    f"生成代码重试耗尽，任务已挂起。\n使用 /继续生成 {plugin_name} 恢复。"
+                                )
+                            )
+                            return {
+                                "success": False,
+                                "error": error_msg,
+                                "suspended": True,
+                            }
                         else:
-                            await event.send(event.plain_result(
-                                f"任务挂起失败：{error_msg}"
-                            ))
+                            await event.send(
+                                event.plain_result(f"任务挂起失败：{error_msg}")
+                            )
                             return {"success": False, "error": error_msg}
-                    self.logger.warning(f"生成代码失败，重试 {retry_count}/{max_retries2}：{str(code_err)}")
+                    self.logger.warning(
+                        f"生成代码失败，重试 {retry_count}/{max_retries2}：{str(code_err)}"
+                    )
 
             # 步骤5：代码审查与修复
             self._update_status(5, plugin_name)
@@ -1162,21 +1248,26 @@ class PluginGenerator:
                 reason = review_result.get("reason", "代码审查未通过")
                 error_msg = f"代码审查未通过：{reason}"
                 if await self._suspend_task(
-                    step=5, error_message=error_msg, retry_count=retry_count,
-                    plugin_name=plugin_name, description=description,
-                    metadata=metadata, markdown=markdown_doc,
-                    config_schema=config_schema, code=code,
+                    step=5,
+                    error_message=error_msg,
+                    retry_count=retry_count,
+                    plugin_name=plugin_name,
+                    description=description,
+                    metadata=metadata,
+                    markdown=markdown_doc,
+                    config_schema=config_schema,
+                    code=code,
                     review_result=review_result,
                     umo=getattr(event, "unified_msg_origin", ""),
                 ):
-                    await event.send(event.plain_result(
-                        f"代码审查重试耗尽，任务已挂起。\n使用 /继续生成 {plugin_name} 恢复。"
-                    ))
+                    await event.send(
+                        event.plain_result(
+                            f"代码审查重试耗尽，任务已挂起。\n使用 /继续生成 {plugin_name} 恢复。"
+                        )
+                    )
                     return {"success": False, "error": error_msg, "suspended": True}
                 else:
-                    await event.send(event.plain_result(
-                        f"任务挂起失败：{error_msg}"
-                    ))
+                    await event.send(event.plain_result(f"任务挂起失败：{error_msg}"))
                     return {"success": False, "error": error_msg}
 
             # 跳过代码审查通过的消息输出
@@ -1207,22 +1298,34 @@ class PluginGenerator:
                         error_logs = install_result.get("runtime_errors", [])
                         current_code = install_result.get("current_code", code)
                         if await self._suspend_task(
-                            step=6, error_message="\n".join(error_logs),
+                            step=6,
+                            error_message="\n".join(error_logs),
                             retry_count=0,
-                            plugin_name=plugin_name, description=description,
-                            metadata=metadata, markdown=markdown_doc,
-                            config_schema=config_schema, code=current_code,
+                            plugin_name=plugin_name,
+                            description=description,
+                            metadata=metadata,
+                            markdown=markdown_doc,
+                            config_schema=config_schema,
+                            code=current_code,
                             review_result=review_result,
                             umo=getattr(event, "unified_msg_origin", ""),
                         ):
-                            await event.send(event.plain_result(
-                                f"安装验证检测到运行时错误，任务已挂起。\n使用 /继续生成 {plugin_name} 恢复。"
-                            ))
-                            return {"success": False, "error": "安装后运行时错误", "suspended": True}
+                            await event.send(
+                                event.plain_result(
+                                    f"安装验证检测到运行时错误，任务已挂起。\n使用 /继续生成 {plugin_name} 恢复。"
+                                )
+                            )
+                            return {
+                                "success": False,
+                                "error": "安装后运行时错误",
+                                "suspended": True,
+                            }
                         else:
-                            await event.send(event.plain_result(
-                                "任务挂起失败：" + "\n".join(error_logs)
-                            ))
+                            await event.send(
+                                event.plain_result(
+                                    "任务挂起失败：" + "\n".join(error_logs)
+                                )
+                            )
                             return {"success": False, "error": "\n".join(error_logs)}
                     else:
                         await event.send(
@@ -1317,7 +1420,11 @@ class PluginGenerator:
                 while True:
                     try:
                         if step_by_step or not markdown_doc:
-                            markdown_doc = await self.llm_handler.generate_markdown_document(metadata, description)
+                            markdown_doc = (
+                                await self.llm_handler.generate_markdown_document(
+                                    metadata, description
+                                )
+                            )
                         break
                     except Exception as e:
                         retry_count += 1
@@ -1325,18 +1432,27 @@ class PluginGenerator:
                             error_msg = f"恢复失败（已重试{max_retries}次）：{str(e)}"
                             self.logger.error(error_msg)
                             if await self._suspend_task(
-                                step=2, error_message=error_msg, retry_count=retry_count,
-                                plugin_name=plugin_name, description=description,
+                                step=2,
+                                error_message=error_msg,
+                                retry_count=retry_count,
+                                plugin_name=plugin_name,
+                                description=description,
                                 metadata=metadata,
                                 umo=getattr(event, "unified_msg_origin", ""),
                             ):
-                                return {"success": False, "error": error_msg, "suspended": True}
+                                return {
+                                    "success": False,
+                                    "error": error_msg,
+                                    "suspended": True,
+                                }
                             else:
-                                await event.send(event.plain_result(
-                                    f"任务挂起失败：{error_msg}"
-                                ))
+                                await event.send(
+                                    event.plain_result(f"任务挂起失败：{error_msg}")
+                                )
                                 return {"success": False, "error": error_msg}
-                        self.logger.warning(f"恢复失败，重试 {retry_count}/{max_retries}：{str(e)}")
+                        self.logger.warning(
+                            f"恢复失败，重试 {retry_count}/{max_retries}：{str(e)}"
+                        )
                 metadata["markdown"] = markdown_doc
 
             # --- Step 3 ---
@@ -1345,7 +1461,9 @@ class PluginGenerator:
                 retry_count = 0
                 while True:
                     try:
-                        config_schema = await self.llm_handler.generate_config_schema(metadata, description)
+                        config_schema = await self.llm_handler.generate_config_schema(
+                            metadata, description
+                        )
                         config_schema = self._normalize_config_schema(config_schema)
                         break
                     except Exception as e:
@@ -1354,18 +1472,28 @@ class PluginGenerator:
                             error_msg = f"恢复失败（已重试{max_retries}次）：{str(e)}"
                             self.logger.error(error_msg)
                             if await self._suspend_task(
-                                step=3, error_message=error_msg, retry_count=retry_count,
-                                plugin_name=plugin_name, description=description,
-                                metadata=metadata, markdown=markdown_doc,
+                                step=3,
+                                error_message=error_msg,
+                                retry_count=retry_count,
+                                plugin_name=plugin_name,
+                                description=description,
+                                metadata=metadata,
+                                markdown=markdown_doc,
                                 umo=getattr(event, "unified_msg_origin", ""),
                             ):
-                                return {"success": False, "error": error_msg, "suspended": True}
+                                return {
+                                    "success": False,
+                                    "error": error_msg,
+                                    "suspended": True,
+                                }
                             else:
-                                await event.send(event.plain_result(
-                                    f"任务挂起失败：{error_msg}"
-                                ))
+                                await event.send(
+                                    event.plain_result(f"任务挂起失败：{error_msg}")
+                                )
                                 return {"success": False, "error": error_msg}
-                        self.logger.warning(f"恢复失败，重试 {retry_count}/{max_retries}：{str(e)}")
+                        self.logger.warning(
+                            f"恢复失败，重试 {retry_count}/{max_retries}：{str(e)}"
+                        )
 
             # Steps 1-3 completed — check user confirmation for non-auto-approve
             if step <= 3 and not self.config.get("auto_approve", False):
@@ -1374,7 +1502,9 @@ class PluginGenerator:
                         f"插件方案已重新生成：\n\n{self._build_preview_text(metadata, '', '')}"
                     )
                 )
-                await self._send_doc_and_config_images(event, metadata, markdown_doc, config_schema)
+                await self._send_doc_and_config_images(
+                    event, metadata, markdown_doc, config_schema
+                )
                 self.pending_generation = {
                     "active": True,
                     "metadata": metadata,
@@ -1389,9 +1519,11 @@ class PluginGenerator:
                 }
                 self._save_pending_state()
                 await self._delete_suspended(task_key)
-                await event.send(event.plain_result(
-                    "请使用指令 '/同意生成' 确认生成，或 '/拒绝生成' 取消生成。"
-                ))
+                await event.send(
+                    event.plain_result(
+                        "请使用指令 '/同意生成' 确认生成，或 '/拒绝生成' 取消生成。"
+                    )
+                )
                 return {"success": False, "pending_confirmation": True}
 
             # --- Step 4 ---
@@ -1400,7 +1532,9 @@ class PluginGenerator:
                 retry_count = 0
                 while True:
                     try:
-                        code = await self.llm_handler.generate_plugin_code(metadata, markdown_doc, config_schema)
+                        code = await self.llm_handler.generate_plugin_code(
+                            metadata, markdown_doc, config_schema
+                        )
                         break
                     except Exception as e:
                         retry_count += 1
@@ -1408,19 +1542,29 @@ class PluginGenerator:
                             error_msg = f"恢复失败（已重试{max_retries}次）：{str(e)}"
                             self.logger.error(error_msg)
                             if await self._suspend_task(
-                                step=4, error_message=error_msg, retry_count=retry_count,
-                                plugin_name=plugin_name, description=description,
-                                metadata=metadata, markdown=markdown_doc,
+                                step=4,
+                                error_message=error_msg,
+                                retry_count=retry_count,
+                                plugin_name=plugin_name,
+                                description=description,
+                                metadata=metadata,
+                                markdown=markdown_doc,
                                 config_schema=config_schema,
                                 umo=getattr(event, "unified_msg_origin", ""),
                             ):
-                                return {"success": False, "error": error_msg, "suspended": True}
+                                return {
+                                    "success": False,
+                                    "error": error_msg,
+                                    "suspended": True,
+                                }
                             else:
-                                await event.send(event.plain_result(
-                                    f"任务挂起失败：{error_msg}"
-                                ))
+                                await event.send(
+                                    event.plain_result(f"任务挂起失败：{error_msg}")
+                                )
                                 return {"success": False, "error": error_msg}
-                        self.logger.warning(f"恢复失败，重试 {retry_count}/{max_retries}：{str(e)}")
+                        self.logger.warning(
+                            f"恢复失败，重试 {retry_count}/{max_retries}：{str(e)}"
+                        )
 
             # --- Step 5 ---
             if step <= 5:
@@ -1441,18 +1585,24 @@ class PluginGenerator:
                 ) and (unlimited_retry or retry_count < max_retries):
                     retry_count += 1
                     if strict_review and not review_result["approved"]:
-                        await event.send(event.plain_result(
-                            f"代码审查未通过，正在修复（第{retry_count}次重试）..."
-                        ))
+                        await event.send(
+                            event.plain_result(
+                                f"代码审查未通过，正在修复（第{retry_count}次重试）..."
+                            )
+                        )
                     else:
-                        await event.send(event.plain_result(
-                            f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."
-                        ))
+                        await event.send(
+                            event.plain_result(
+                                f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."
+                            )
+                        )
                     code = await self.llm_handler.fix_plugin_code(
                         code, review_result["issues"], review_result["suggestions"]
                     )
                     review_result = self._normalize_review_result(
-                        await self.llm_handler.review_plugin_code(code, metadata, markdown_doc)
+                        await self.llm_handler.review_plugin_code(
+                            code, metadata, markdown_doc
+                        )
                     )
 
                 if (review_result["satisfaction_score"] < satisfaction_threshold) or (
@@ -1461,21 +1611,28 @@ class PluginGenerator:
                     reason = review_result.get("reason", "代码审查未通过")
                     error_msg = f"代码审查未通过：{reason}"
                     if await self._suspend_task(
-                        step=5, error_message=error_msg, retry_count=retry_count,
-                        plugin_name=plugin_name, description=description,
-                        metadata=metadata, markdown=markdown_doc,
-                        config_schema=config_schema, code=code,
+                        step=5,
+                        error_message=error_msg,
+                        retry_count=retry_count,
+                        plugin_name=plugin_name,
+                        description=description,
+                        metadata=metadata,
+                        markdown=markdown_doc,
+                        config_schema=config_schema,
+                        code=code,
                         review_result=review_result,
                         umo=getattr(event, "unified_msg_origin", ""),
                     ):
-                        await event.send(event.plain_result(
-                            f"代码审查重试耗尽，任务已重新挂起。\n使用 /继续生成 {plugin_name} 恢复。"
-                        ))
+                        await event.send(
+                            event.plain_result(
+                                f"代码审查重试耗尽，任务已重新挂起。\n使用 /继续生成 {plugin_name} 恢复。"
+                            )
+                        )
                         return {"success": False, "error": error_msg, "suspended": True}
                     else:
-                        await event.send(event.plain_result(
-                            f"任务挂起失败：{error_msg}"
-                        ))
+                        await event.send(
+                            event.plain_result(f"任务挂起失败：{error_msg}")
+                        )
                         return {"success": False, "error": error_msg}
 
             # --- Step 6 ---
@@ -1492,7 +1649,9 @@ class PluginGenerator:
                 "success": True,
                 "plugin_name": plugin_name,
                 "plugin_path": "",
-                "satisfaction_score": review_result.get("satisfaction_score", 0) if step <= 5 else 0,
+                "satisfaction_score": review_result.get("satisfaction_score", 0)
+                if step <= 5
+                else 0,
                 "installed": False,
             }
 
@@ -1510,38 +1669,56 @@ class PluginGenerator:
                         error_logs = install_result.get("runtime_errors", [])
                         current_code = install_result.get("current_code", code)
                         if await self._suspend_task(
-                            step=6, error_message="\n".join(error_logs),
+                            step=6,
+                            error_message="\n".join(error_logs),
                             retry_count=0,
-                            plugin_name=plugin_name, description=description,
-                            metadata=metadata, markdown=markdown_doc,
-                            config_schema=config_schema, code=current_code,
+                            plugin_name=plugin_name,
+                            description=description,
+                            metadata=metadata,
+                            markdown=markdown_doc,
+                            config_schema=config_schema,
+                            code=current_code,
                             review_result=review_result if step <= 5 else {},
                             umo=getattr(event, "unified_msg_origin", ""),
                         ):
-                            await event.send(event.plain_result(
-                                f"安装验证检测到运行时错误，任务已重新挂起。\n使用 /继续生成 {plugin_name} 恢复。"
-                            ))
-                            return {"success": False, "error": "安装后运行时错误", "suspended": True}
+                            await event.send(
+                                event.plain_result(
+                                    f"安装验证检测到运行时错误，任务已重新挂起。\n使用 /继续生成 {plugin_name} 恢复。"
+                                )
+                            )
+                            return {
+                                "success": False,
+                                "error": "安装后运行时错误",
+                                "suspended": True,
+                            }
                         else:
-                            await event.send(event.plain_result(
-                                "任务挂起失败：" + "\n".join(error_logs)
-                            ))
+                            await event.send(
+                                event.plain_result(
+                                    "任务挂起失败：" + "\n".join(error_logs)
+                                )
+                            )
                             return {"success": False, "error": "\n".join(error_logs)}
                     else:
-                        await event.send(event.plain_result("插件已通过API安装并验证正常"))
+                        await event.send(
+                            event.plain_result("插件已通过API安装并验证正常")
+                        )
                 else:
                     result["install_error"] = install_result.get("error", "未知错误")
-                    await event.send(event.plain_result(
-                        f"插件安装失败: {install_result.get('error')}"
-                    ))
+                    await event.send(
+                        event.plain_result(
+                            f"插件安装失败: {install_result.get('error')}"
+                        )
+                    )
             else:
                 plugin_path = await self._create_plugin_files(
                     plugin_name, metadata, code, markdown_doc, config_schema
                 )
                 result["plugin_path"] = plugin_path
-                await event.send(event.plain_result(
-                    f"插件已在本地创建: {plugin_path}\n请手动重启AstrBot以加载插件"
-                ))
+                await event.send(
+                    event.plain_result(
+                        f"插件已在本地创建: {plugin_path}\n请手动重启AstrBot以加载插件"
+                    )
+                )
 
             await self._delete_suspended(task_key)
             return result

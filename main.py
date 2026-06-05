@@ -310,9 +310,7 @@ class CodeMagePlugin(Star):
 
         # 取消插件生成流程
         try:
-            await self.plugin_generator.continue_plugin_generation(
-                False, event=event
-            )
+            await self.plugin_generator.continue_plugin_generation(False, event=event)
             yield event.plain_result("已完全停止插件生成")
         except Exception as e:
             self.logger.error(f"拒绝插件生成过程中发生错误: {str(e)}")
@@ -403,30 +401,37 @@ class CodeMagePlugin(Star):
                 else:
                     lines = ["当前有多个挂起任务，请指定插件名：\n"]
                     step_names = [
-                        "生成元数据", "生成文档", "生成配置",
-                        "生成代码", "代码审查", "安装验证",
+                        "生成元数据",
+                        "生成文档",
+                        "生成配置",
+                        "生成代码",
+                        "代码审查",
+                        "安装验证",
                     ]
                     for t in suspended_tasks:
                         s = t.get("failed_step", 0)
                         s_desc = step_names[s - 1] if 1 <= s <= 6 else f"步骤{s}"
                         ts = t.get("timestamp", "未知时间")
                         lines.append(
-                            f"  - {t.get('plugin_name', '?')} "
-                            f"[{s_desc}] ({ts})"
+                            f"  - {t.get('plugin_name', '?')} [{s_desc}] ({ts})"
                         )
                     lines.append("\n使用 /继续生成 <插件名> 恢复指定任务")
                     yield event.plain_result("\n".join(lines))
                     return
 
             yield event.plain_result(f"正在恢复挂起任务：{target_name}...")
-            result = await self.plugin_generator.resume_suspended_task(target_name, event)
+            result = await self.plugin_generator.resume_suspended_task(
+                target_name, event
+            )
 
             if result.get("success"):
                 message = f"插件生成成功！\n插件名称：{result['plugin_name']}"
                 if result.get("installed"):
                     message += f"\n安装状态：{'已安装' if result.get('install_success') else '安装失败'}"
                     if not result.get("install_success"):
-                        message += f"\n安装错误：{result.get('install_error', '未知错误')}"
+                        message += (
+                            f"\n安装错误：{result.get('install_error', '未知错误')}"
+                        )
                 yield event.plain_result(message)
             elif result.get("pending_confirmation"):
                 pass
@@ -453,7 +458,9 @@ class CodeMagePlugin(Star):
         target_name = args_text.strip() if args_text else ""
 
         if not target_name:
-            yield event.plain_result("请指定要放弃的任务名，例如：/放弃挂起 astrbot_plugin_weather\n使用 /挂起任务 查看所有挂起任务")
+            yield event.plain_result(
+                "请指定要放弃的任务名，例如：/放弃挂起 astrbot_plugin_weather\n使用 /挂起任务 查看所有挂起任务"
+            )
             return
 
         try:
@@ -484,8 +491,12 @@ class CodeMagePlugin(Star):
                 return
 
             step_names = [
-                "生成元数据", "生成文档", "生成配置",
-                "生成代码", "代码审查", "安装验证",
+                "生成元数据",
+                "生成文档",
+                "生成配置",
+                "生成代码",
+                "代码审查",
+                "安装验证",
             ]
             lines = [f"当前有 {len(suspended_tasks)} 个挂起任务：\n"]
             for t in suspended_tasks:
