@@ -310,7 +310,7 @@ class CodeMagePlugin(Star):
 
         # 取消插件生成流程
         try:
-            result = await self.plugin_generator.continue_plugin_generation(
+            await self.plugin_generator.continue_plugin_generation(
                 False, event=event
             )
             yield event.plain_result("已完全停止插件生成")

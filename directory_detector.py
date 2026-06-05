@@ -68,7 +68,7 @@ class DirectoryDetector:
                     data_plugins_path = os.path.join(path, "data", "plugins")
                     if os.path.exists(data_plugins_path):
                         return True
-        except:
+        except Exception:
             pass
 
         return False
