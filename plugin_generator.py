@@ -1766,7 +1766,7 @@ class PluginGenerator:
         current_retry = 0
         current_code = code
 
-        while current_retry <= max_retries:
+        while max_retries == -1 or current_retry <= max_retries:
             temp_dir = tempfile.mkdtemp(prefix="codemage_plugin_")
             zip_path = None
 
@@ -1833,7 +1833,7 @@ class PluginGenerator:
                     f"检测到插件错误 (尝试 {current_retry + 1}):\n{error_msg}"
                 )
 
-                if current_retry >= max_retries:
+                if max_retries != -1 and current_retry >= max_retries:
                     # 达到最大重试次数，放弃
                     await event.send(
                         event.plain_result(

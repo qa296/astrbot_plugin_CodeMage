@@ -35,7 +35,7 @@ class PluginInstaller:
         """
         import time
 
-        self._install_timestamp = timestamp or time.time()
+        self._install_timestamp = time.time() if timestamp is None else timestamp
 
     async def login(self) -> bool:
         """登录AstrBot并获取token
