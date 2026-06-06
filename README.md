@@ -9,14 +9,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/qa296/astrbot_plugin_codemage/issues">
-    <img src="https://img.shields.io/github/issues/qa296/astrbot_plugin_codemage" alt="GitHub Issues">
+  <a href="https://github.com/qa296/astrbot_plugin_CodeMage/issues">
+    <img src="https://img.shields.io/github/issues/qa296/astrbot_plugin_CodeMage" alt="GitHub Issues">
   </a>
-  <a href="https://github.com/qa296/astrbot_plugin_codemage/stargazers">
-    <img src="https://img.shields.io/github/stars/qa296/astrbot_plugin_codemage" alt="GitHub Stars">
+  <a href="https://github.com/qa296/astrbot_plugin_CodeMage/stargazers">
+    <img src="https://img.shields.io/github/stars/qa296/astrbot_plugin_CodeMage" alt="GitHub Stars">
   </a>
-  <a href="https://github.com/qa296/astrbot_plugin_codemage/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/qa296/astrbot_plugin_codemage" alt="GitHub License">
+  <a href="https://github.com/qa296/astrbot_plugin_CodeMage/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/qa296/astrbot_plugin_CodeMage" alt="GitHub License">
   </a>
 </p>
 
@@ -46,7 +46,7 @@ CodeMage 是一个基于AI的 AstrBot 插件生成器，可以根据自然语言
 cd AstrBot/data/plugins
 
 # 克隆插件仓库
-git clone https://github.com/qa296/astrbot_plugin_codemage.git
+git clone https://github.com/qa296/astrbot_plugin_CodeMage.git
 ```
 
 3. 重启 AstrBot 以加载插件
