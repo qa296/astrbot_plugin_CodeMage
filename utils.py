@@ -3,6 +3,7 @@ CodeMage工具函数模块
 提供通用功能函数
 """
 
+import difflib
 import json
 import os
 import re
@@ -262,3 +263,166 @@ def escape_markdown(text: str) -> str:
         text = text.replace(char, f"\\{char}")
 
     return text
+
+
+def parse_search_replace_blocks(text: str) -> list[tuple[str, str]]:
+    """解析 LLM 输出的 SEARCH/REPLACE 块。
+
+    块格式：
+        <<<<<<< SEARCH
+        <原始代码片段>
+        =======
+        <替换后的代码片段>
+        >>>>>>> REPLACE
+
+    Args:
+        text: LLM 返回的原始文本。
+
+    Returns:
+        List[Tuple[str, str]]: (search, replace) 列表。
+        解析失败或 LLM 未输出任何块时返回空列表。
+    """
+    pattern = re.compile(
+        r"<<<<<<< SEARCH\n(.*?)\n=======\n(.*?)\n>>>>>>> REPLACE",
+        re.DOTALL,
+    )
+    return [(m.group(1), m.group(2)) for m in pattern.finditer(text)]
+
+
+def _sliding_window_match(
+    content_lines: list[str],
+    search_lines: list[str],
+    threshold: float,
+) -> tuple[int, float] | None:
+    """在 content_lines 上做行级滑动窗口，查找与 search_lines 最相似的子序列。
+
+    窗口大小 = search_lines 行数 ±2。
+
+    Args:
+        content_lines: 原文件按行切分（不含换行符）。
+        search_lines: SEARCH 块按行切分。
+        threshold: 相似度阈值。
+
+    Returns:
+        Optional[Tuple[int, float]]: (窗口起始行号, 相似度)，低于阈值返回 None。
+        行号以 0 开始。
+    """
+    if not search_lines:
+        return None
+
+    n = len(search_lines)
+    if not content_lines:
+        return None
+
+    best_ratio = 0.0
+    best_start = -1
+
+    # 窗口大小 = n ± 2；同时确保窗口至少 1 行
+    min_size = max(1, n - 2)
+    max_size = n + 2
+    max_size = min(max_size, len(content_lines))
+
+    matcher = difflib.SequenceMatcher(autojunk=False)
+
+    for size in range(min_size, max_size + 1):
+        for start in range(len(content_lines) - size + 1):
+            window = content_lines[start : start + size]
+            matcher.set_seqs("\n".join(search_lines), "\n".join(window))
+            ratio = matcher.ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_start = start
+
+    if best_ratio >= threshold and best_start >= 0:
+        return best_start, best_ratio
+    return None
+
+
+def apply_search_replace(
+    content: str,
+    search: str,
+    replace: str,
+    fuzzy_threshold: float = 0.85,
+) -> tuple[bool, str, str]:
+    """应用单个 SEARCH/REPLACE 到 content。
+
+    匹配策略：
+    1. 精确匹配 1 次 → 直接替换。
+    2. 精确匹配 ≥2 次 → 报歧义。
+    3. 精确匹配 0 次 → 用 difflib 行级滑动窗口做 fuzzy 匹配。
+       相似度 ≥ fuzzy_threshold 才应用，并在 message 中标记 method=fuzzy。
+
+    Args:
+        content: 原始文件内容。
+        search: SEARCH 块原文。
+        replace: REPLACE 块原文。
+        fuzzy_threshold: fuzzy 匹配的相似度阈值（0~1）。
+
+    Returns:
+        Tuple[bool, str, str]: (success, new_content, message)。
+        message 中包含匹配方式：'exact' / 'fuzzy' / 失败原因。
+    """
+    # 1. 精确匹配
+    count = content.count(search)
+    if count == 1:
+        new_content = content.replace(search, replace, 1)
+        return True, new_content, "exact"
+
+    if count > 1:
+        return (
+            False,
+            content,
+            f"SEARCH block appears {count} times in the file (ambiguous match)",
+        )
+
+    # 2. Fuzzy 匹配
+    # 切分时保留原始换行结构；splitlines() 会丢弃各种换行符，需要重新拼接
+    content_lines = content.splitlines()
+    search_lines = search.splitlines()
+
+    window_match = _sliding_window_match(content_lines, search_lines, fuzzy_threshold)
+    if window_match is None:
+        # 兜底：尝试 trim 末尾空行再匹配（LLM 经常少一个或多个尾随换行）
+        trimmed_search = search.rstrip("\n")
+        if trimmed_search != search and content.count(trimmed_search) == 1:
+            new_content = content.replace(trimmed_search, replace.rstrip("\n"), 1)
+            return True, new_content, "exact-trimmed"
+
+        return (
+            False,
+            content,
+            f"SEARCH block not found in the file (no match above fuzzy threshold {fuzzy_threshold})",
+        )
+
+    start_line, ratio = window_match
+    # 把命中窗口替换为 replace；保留前后换行符不丢失
+    # content_lines[start_line] 到 content_lines[start_line + size - 1] 是匹配窗口
+    # 窗口大小需要重算（因为 size 在 fuzzy 中变化），根据 ratio 所在 size 重新推导
+    # 简化处理：取最佳 size 的窗口——通过重新匹配最佳 size 来定位
+    n = len(search_lines)
+    best_size = n
+    best_r = 0.0
+    matcher = difflib.SequenceMatcher(autojunk=False)
+    for size in range(max(1, n - 2), min(n + 2, len(content_lines)) + 1):
+        window = content_lines[start_line : start_line + size]
+        matcher.set_seqs("\n".join(search_lines), "\n".join(window))
+        r = matcher.ratio()
+        if r > best_r:
+            best_r = r
+            best_size = size
+
+    new_lines = (
+        content_lines[:start_line]
+        + replace.splitlines()
+        + content_lines[start_line + best_size :]
+    )
+    # 重建文本：行间用 '\n' 连接；如果原 content 以 '\n' 结尾则保留
+    new_content = "\n".join(new_lines)
+    if content.endswith("\n") and not new_content.endswith("\n"):
+        new_content += "\n"
+
+    return (
+        True,
+        new_content,
+        f"fuzzy (ratio={ratio:.2f}, threshold={fuzzy_threshold})",
+    )

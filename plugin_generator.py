@@ -849,9 +849,19 @@ class PluginGenerator:
                             f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."
                         )
                     )
-                code = await self.llm_handler.fix_plugin_code(
-                    code, review_result["issues"], review_result["suggestions"]
+                new_code, diff_errors = (
+                    await self.llm_handler.fix_plugin_code_with_diff(
+                        code, review_result["issues"], review_result["suggestions"]
+                    )
                 )
+                if diff_errors:
+                    # 差分修复失败：保留原 code，把错误信息带入下一轮审查，
+                    # 让 LLM 在生成 SEARCH 块时看到更具体的上下文
+                    self.logger.warning(
+                        f"差分修复未应用任何变更：{diff_errors}"
+                    )
+                else:
+                    code = new_code
                 review_result = self._normalize_review_result(
                     await self.llm_handler.review_plugin_code(
                         code, metadata, markdown_doc
@@ -1233,9 +1243,19 @@ class PluginGenerator:
                             f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."
                         )
                     )
-                code = await self.llm_handler.fix_plugin_code(
-                    code, review_result["issues"], review_result["suggestions"]
+                new_code, diff_errors = (
+                    await self.llm_handler.fix_plugin_code_with_diff(
+                        code, review_result["issues"], review_result["suggestions"]
+                    )
                 )
+                if diff_errors:
+                    # 差分修复失败：保留原 code，把错误信息带入下一轮审查，
+                    # 让 LLM 在生成 SEARCH 块时看到更具体的上下文
+                    self.logger.warning(
+                        f"差分修复未应用任何变更：{diff_errors}"
+                    )
+                else:
+                    code = new_code
                 review_result = self._normalize_review_result(
                     await self.llm_handler.review_plugin_code(
                         code, metadata, markdown_doc
@@ -1596,9 +1616,19 @@ class PluginGenerator:
                                 f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."
                             )
                         )
-                    code = await self.llm_handler.fix_plugin_code(
+                new_code, diff_errors = (
+                    await self.llm_handler.fix_plugin_code_with_diff(
                         code, review_result["issues"], review_result["suggestions"]
                     )
+                )
+                if diff_errors:
+                    # 差分修复失败：保留原 code，把错误信息带入下一轮审查，
+                    # 让 LLM 在生成 SEARCH 块时看到更具体的上下文
+                    self.logger.warning(
+                        f"差分修复未应用任何变更：{diff_errors}"
+                    )
+                else:
+                    code = new_code
                     review_result = self._normalize_review_result(
                         await self.llm_handler.review_plugin_code(
                             code, metadata, markdown_doc
@@ -1862,9 +1892,22 @@ class PluginGenerator:
                 fix_prompt = (
                     f"插件安装后运行报错，请修复代码。\n错误日志：\n{error_msg}"
                 )
-                current_code = await self.llm_handler.fix_plugin_code(
-                    current_code, [fix_prompt], ["请根据错误日志修复代码"]
+                new_code, diff_errors = (
+                    await self.llm_handler.fix_plugin_code_with_diff(
+                        current_code,
+                        [fix_prompt],
+                        ["请根据错误日志修复代码"],
+                        error_log=error_msg,
+                    )
                 )
+                if diff_errors:
+                    # 差分修复失败：保持 current_code 不变，进入下一轮重试，
+                    # 让 LLM 看到上一轮的错误反馈后重新生成 SEARCH/REPLACE。
+                    self.logger.warning(
+                        f"差分修复未应用任何变更：{diff_errors}"
+                    )
+                else:
+                    current_code = new_code
 
                 current_retry += 1
 

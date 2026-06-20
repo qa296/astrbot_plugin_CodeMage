@@ -10,7 +10,13 @@ from typing import Any
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.star import Context
 
-from .utils import extract_code_blocks, extract_codemage_block, parse_json_response
+from .utils import (
+    apply_search_replace,
+    extract_code_blocks,
+    extract_codemage_block,
+    parse_json_response,
+    parse_search_replace_blocks,
+)
 
 
 class LLMHandler:
@@ -585,6 +591,145 @@ class LLMHandler:
         raise ValueError(
             f"经过{max_retries}次重试，仍无法从LLM响应中提取修复后的插件代码"
         )
+
+    async def fix_plugin_code_with_diff(
+        self,
+        code: str,
+        issues: list[str],
+        suggestions: list[str],
+        error_log: str = "",
+        max_retries: int = 3,
+    ) -> tuple[str, list[str]]:
+        """用 SEARCH/REPLACE 块以"差分"方式修复代码。
+
+        与 :meth:`fix_plugin_code` 不同，该方法只让 LLM 输出需要修改的部分（SEARCH/REPLACE
+        块），由本方法在内存中精确替换。其他未列在 SEARCH 块内的字节保持原样。
+
+        Args:
+            code: 当前 main.py 完整内容。
+            issues: 代码审查列出的问题列表。
+            suggestions: 代码审查给出的建议列表。
+            error_log: 运行时错误日志（来自 _install_with_auto_retry），可为空。
+            max_retries: 解析/应用失败时的最大重试次数。
+
+        Returns:
+            Tuple[str, List[str]]: (new_code, error_messages)。
+            - 成功：new_code 是已应用 SEARCH/REPLACE 后的完整代码，error_messages 为空列表。
+            - 失败（任何一次重试都未能应用）：返回原始 code 与最后一次的错误信息列表。
+            失败时**不会**回退到全量重写，按用户要求保持差分模式。
+        """
+        issues_str = "\n".join([f"- {issue}" for issue in issues]) or "（无）"
+        suggestions_str = (
+            "\n".join([f"- {suggestion}" for suggestion in suggestions]) or "（无）"
+        )
+
+        base_system_prompt = f"""你是一个精确的 Python 代码编辑器。当前任务：根据反馈修复一个现有 Python 文件中的问题。
+
+## 严格规则
+1. **只**修改需要修改的部分；其他代码字节级保持原样（包括 import 顺序、空行、注释风格、变量命名）。
+2. 输出一个或多个 SEARCH/REPLACE 块，不要输出任何其他内容。
+3. SEARCH 块必须**完整**从原文件中复制（包括缩进、空行、上下文行），不可省略上下文。
+4. 每次只替换最小必要区域——不要替换整个函数或整个文件。
+5. 不要改 import 顺序、注释、空行、变量名，除非问题明确指向它们。
+6. 反向提示词要求：{self.negative_prompt}
+
+## 输出格式
+对每个需要修改的区域，按以下格式输出一个块：
+
+<<<<<<< SEARCH
+<原文件中需要被替换的代码片段，必须 100% 匹配>
+=======
+<替换后的代码片段>
+>>>>>>> REPLACE
+
+可以输出多个块。所有块按从上到下的顺序应用。
+"""
+
+        base_prompt = (
+            f"请根据反馈修复以下 Python 文件中的问题：\n\n"
+            f"```python\n{code}\n```\n\n"
+            f"问题：\n{issues_str}\n\n"
+            f"建议：\n{suggestions_str}\n"
+        )
+        if error_log:
+            base_prompt += f"\n运行时错误日志：\n```\n{error_log}\n```\n"
+        base_prompt += "\n请输出 SEARCH/REPLACE 块：\n"
+
+        last_errors: list[str] = []
+        feedback = ""
+
+        for attempt in range(max_retries):
+            try:
+                prompt = base_prompt + feedback
+                response = await self.call_llm(prompt, base_system_prompt)
+
+                blocks = parse_search_replace_blocks(response)
+                if not blocks:
+                    last_errors = [
+                        "LLM response did not contain any valid SEARCH/REPLACE blocks."
+                    ]
+                    feedback = (
+                        "\n\n上一次的回复中没有找到任何 SEARCH/REPLACE 块。"
+                        "请严格按照下面的格式输出，不要包含其他文字：\n\n"
+                        "<<<<<<< SEARCH\n<原代码>\n=======\n<新代码>\n>>>>>>> REPLACE\n"
+                    )
+                    self.logger.warning(
+                        f"差分修复第 {attempt + 1}/{max_retries} 次：未找到 SEARCH/REPLACE 块"
+                    )
+                    continue
+
+                current = code
+                attempt_errors: list[str] = []
+                applied = 0
+
+                for idx, (search, replace) in enumerate(blocks, 1):
+                    ok, current, msg = apply_search_replace(current, search, replace)
+                    if ok:
+                        applied += 1
+                        self.logger.info(
+                            f"差分修复：第 {idx} 个块已应用（{msg}）"
+                        )
+                    else:
+                        attempt_errors.append(f"Block #{idx}: {msg}")
+
+                if not attempt_errors:
+                    # 全部块应用成功
+                    if applied < len(blocks):
+                        # 理论上不会走到这里，但保留以防万一
+                        self.logger.info(
+                            f"差分修复：成功应用 {applied}/{len(blocks)} 个块"
+                        )
+                    return current, []
+
+                # 部分或全部块应用失败 → 进入下一轮重试，把错误反馈给 LLM
+                last_errors = attempt_errors
+                feedback = (
+                    "\n\n上一次尝试中，以下 SEARCH 块无法在原文件中匹配：\n"
+                    + "\n".join(f"- {e}" for e in attempt_errors)
+                    + "\n\n请重新输出所有需要修改的块，"
+                    "确保 SEARCH 部分完整复制自上面给出的代码（包括缩进）。\n"
+                )
+                self.logger.warning(
+                    f"差分修复第 {attempt + 1}/{max_retries} 次："
+                    f"应用了 {applied}/{len(blocks)} 个块，{len(attempt_errors)} 个失败"
+                )
+
+            except Exception as e:
+                err = f"LLM call or diff application raised an exception: {e}"
+                last_errors = [err]
+                self.logger.error(
+                    f"差分修复第 {attempt + 1}/{max_retries} 次异常：{err}"
+                )
+                feedback = (
+                    "\n\n上一次尝试发生异常："
+                    f"{e}\n请重新输出 SEARCH/REPLACE 块。\n"
+                )
+
+        # 重试用尽仍未成功：返回原 code 和最后一次的错误信息
+        self.logger.error(
+            f"差分修复失败，已重试 {max_retries} 次：{last_errors}"
+        )
+        return code, last_errors
 
     async def generate_config_schema(
         self, metadata: dict[str, Any], description: str
