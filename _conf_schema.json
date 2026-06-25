@@ -85,9 +85,9 @@
     "default": "astrbot"
   },
   "api_password_md5": {
-    "description": "API密码(MD5)",
+    "description": "登录密码",
     "type": "string",
-    "hint": "AstrBot API的登录密码（MD5加密后的值）。使用 /密码转md5 指令转换明文密码",
+    "hint": "新版本更改了密码验证方式，你可以直接填写进去登录密码。如果登录失败，则填写MD5加密后的值（使用 /密码转md5 指令转换明文密码）",
     "default": ""
   }
 }
