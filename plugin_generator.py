@@ -29,6 +29,7 @@ class PluginGenerator:
     ):
         self.context = context
         self.config = config
+        self.config_path = getattr(config, "config_path", None)
         self.llm_handler = LLMHandler(context, config)
         self.directory_detector = DirectoryDetector()
         self.installer = installer
@@ -80,6 +81,23 @@ class PluginGenerator:
             Dict[str, Any]: 当前状态
         """
         return self.generation_status.copy()
+
+    def _get_satisfaction_threshold(self) -> int:
+        """获取满意度阈值，优先从配置文件读取以绕过 AstrBotConfig 内存快照问题。"""
+        # 方式1：从配置文件直接读取
+        try:
+            if self.config_path and os.path.exists(self.config_path):
+                with open(self.config_path, encoding="utf-8") as f:
+                    conf = json.load(f)
+                return int(conf.get("satisfaction_threshold", 80))
+        except (FileNotFoundError, json.JSONDecodeError, TypeError, ValueError):
+            pass
+
+        # 方式2：从内存 config 对象读取
+        try:
+            return int(self.config.get("satisfaction_threshold", 80))
+        except (TypeError, ValueError):
+            return 80
 
     # ---- 待确认任务持久化 ----
     def _get_state_dir(self) -> str | None:
@@ -524,6 +542,9 @@ class PluginGenerator:
         if self.generation_status["is_generating"]:
             return {"success": False, "error": "已有插件正在生成中，请稍后再试"}
 
+        # 输出当前满意度阈值（用于测试验证）
+        self.logger.info(f"当前满意度阈值: {self._get_satisfaction_threshold()}")
+
         # 设置生成状态
         self.generation_status["is_generating"] = True
         self.generation_status["start_time"] = format_time(time.time())
@@ -826,7 +847,7 @@ class PluginGenerator:
             review_result = self._normalize_review_result(
                 await self._review_code_with_retry(code, metadata, markdown_doc)
             )
-            satisfaction_threshold = self.config.get("satisfaction_threshold", 80)
+            satisfaction_threshold = self._get_satisfaction_threshold()
             strict_review = self.config.get("strict_review", True)
             max_retries = self.config.get("max_retries", 3)
             unlimited_retry = max_retries == -1
@@ -849,17 +870,16 @@ class PluginGenerator:
                             f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."
                         )
                     )
-                new_code, diff_errors = (
-                    await self.llm_handler.fix_plugin_code_with_diff(
-                        code, review_result["issues"], review_result["suggestions"]
-                    )
+                (
+                    new_code,
+                    diff_errors,
+                ) = await self.llm_handler.fix_plugin_code_with_diff(
+                    code, review_result["issues"], review_result["suggestions"]
                 )
                 if diff_errors:
                     # 差分修复失败：保留原 code，把错误信息带入下一轮审查，
                     # 让 LLM 在生成 SEARCH 块时看到更具体的上下文
-                    self.logger.warning(
-                        f"差分修复未应用任何变更：{diff_errors}"
-                    )
+                    self.logger.warning(f"差分修复未应用任何变更：{diff_errors}")
                 else:
                     code = new_code
                 review_result = self._normalize_review_result(
@@ -1220,7 +1240,7 @@ class PluginGenerator:
             review_result = self._normalize_review_result(
                 await self._review_code_with_retry(code, metadata, markdown_doc)
             )
-            satisfaction_threshold = self.config.get("satisfaction_threshold", 80)
+            satisfaction_threshold = self._get_satisfaction_threshold()
             strict_review = self.config.get("strict_review", True)
             max_retries = self.config.get("max_retries", 3)
             unlimited_retry = max_retries == -1
@@ -1243,17 +1263,16 @@ class PluginGenerator:
                             f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."
                         )
                     )
-                new_code, diff_errors = (
-                    await self.llm_handler.fix_plugin_code_with_diff(
-                        code, review_result["issues"], review_result["suggestions"]
-                    )
+                (
+                    new_code,
+                    diff_errors,
+                ) = await self.llm_handler.fix_plugin_code_with_diff(
+                    code, review_result["issues"], review_result["suggestions"]
                 )
                 if diff_errors:
                     # 差分修复失败：保留原 code，把错误信息带入下一轮审查，
                     # 让 LLM 在生成 SEARCH 块时看到更具体的上下文
-                    self.logger.warning(
-                        f"差分修复未应用任何变更：{diff_errors}"
-                    )
+                    self.logger.warning(f"差分修复未应用任何变更：{diff_errors}")
                 else:
                     code = new_code
                 review_result = self._normalize_review_result(
@@ -1593,7 +1612,7 @@ class PluginGenerator:
                 review_result = self._normalize_review_result(
                     await self._review_code_with_retry(code, metadata, markdown_doc)
                 )
-                satisfaction_threshold = self.config.get("satisfaction_threshold", 80)
+                satisfaction_threshold = self._get_satisfaction_threshold()
                 strict_review = self.config.get("strict_review", True)
                 max_retries = self.config.get("max_retries", 3)
                 unlimited_retry = max_retries == -1
@@ -1616,17 +1635,16 @@ class PluginGenerator:
                                 f"代码满意度不足（{review_result['satisfaction_score']}分），正在优化（第{retry_count}次重试）..."
                             )
                         )
-                new_code, diff_errors = (
-                    await self.llm_handler.fix_plugin_code_with_diff(
-                        code, review_result["issues"], review_result["suggestions"]
-                    )
+                (
+                    new_code,
+                    diff_errors,
+                ) = await self.llm_handler.fix_plugin_code_with_diff(
+                    code, review_result["issues"], review_result["suggestions"]
                 )
                 if diff_errors:
                     # 差分修复失败：保留原 code，把错误信息带入下一轮审查，
                     # 让 LLM 在生成 SEARCH 块时看到更具体的上下文
-                    self.logger.warning(
-                        f"差分修复未应用任何变更：{diff_errors}"
-                    )
+                    self.logger.warning(f"差分修复未应用任何变更：{diff_errors}")
                 else:
                     code = new_code
                     review_result = self._normalize_review_result(
@@ -1892,20 +1910,19 @@ class PluginGenerator:
                 fix_prompt = (
                     f"插件安装后运行报错，请修复代码。\n错误日志：\n{error_msg}"
                 )
-                new_code, diff_errors = (
-                    await self.llm_handler.fix_plugin_code_with_diff(
-                        current_code,
-                        [fix_prompt],
-                        ["请根据错误日志修复代码"],
-                        error_log=error_msg,
-                    )
+                (
+                    new_code,
+                    diff_errors,
+                ) = await self.llm_handler.fix_plugin_code_with_diff(
+                    current_code,
+                    [fix_prompt],
+                    ["请根据错误日志修复代码"],
+                    error_log=error_msg,
                 )
                 if diff_errors:
                     # 差分修复失败：保持 current_code 不变，进入下一轮重试，
                     # 让 LLM 看到上一轮的错误反馈后重新生成 SEARCH/REPLACE。
-                    self.logger.warning(
-                        f"差分修复未应用任何变更：{diff_errors}"
-                    )
+                    self.logger.warning(f"差分修复未应用任何变更：{diff_errors}")
                 else:
                     current_code = new_code
 
