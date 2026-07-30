@@ -28,6 +28,9 @@ class LLMHandler:
         self.provider_id = config.get("llm_provider_id")
         self.negative_prompt = config.get("negative_prompt", "")
         self.timeout_seconds = config.get("llm_timeout_seconds", 600)
+        self.enable_streaming = config.get("enable_streaming", False)
+        self.chunk_timeout = 60  # 流式模式下每个 chunk 的超时秒数
+        self.provider_manager = context.provider_manager
         self.logger = logger
         self._dev_docs_cache: str | None = None
 
@@ -51,6 +54,23 @@ class LLMHandler:
         full_system_prompt = system_prompt
         if self.negative_prompt:
             full_system_prompt += f"\n\n反向提示词：{self.negative_prompt}"
+
+        # 启用了流式模式时优先尝试流式调用，利用逐 chunk 超时避免总响应时间过长而超时
+        if self.enable_streaming:
+            try:
+                return await self._call_llm_stream(prompt, full_system_prompt)
+            except NotImplementedError:
+                # 提供者不支持流式接口，静默回退到非流式
+                self.logger.info(
+                    f"提供者 {self.provider_id} 不支持流式，回退到非流式调用"
+                )
+            except asyncio.TimeoutError:
+                error_msg = (
+                    f"LLM流式调用超时（chunk超过{self.chunk_timeout}秒无响应），"
+                    f"请检查LLM服务状态"
+                )
+                self.logger.error(error_msg)
+                raise TimeoutError(error_msg)
 
         try:
             # 构建额外参数
@@ -81,6 +101,82 @@ class LLMHandler:
         except Exception as e:
             logger.error(f"LLM调用失败：{str(e)}")
             raise
+
+    async def _call_llm_stream(
+        self, prompt: str, system_prompt: str = ""
+    ) -> str:
+        """使用流式方式调用LLM，逐 chunk 接收并累积完整响应。
+
+        与 call_llm() 不同，此方法对每个 chunk 使用独立的超时（chunk_timeout_seconds），
+        因此即使端到端生成时间较长，只要模型持续输出 token 就不会超时。
+        仅在模型停滞超过 chunk_timeout 秒时才会超时。
+
+        Args:
+            prompt: 用户提示词
+            system_prompt: 完整系统提示词（已包含反向提示词）
+
+        Returns:
+            str: 完整的LLM响应文本
+
+        Raises:
+            NotImplementedError: 提供者不存在或未实现流式接口
+            asyncio.TimeoutError: chunk_timeout 秒内未收到新 chunk
+        """
+        # 获取底层提供者实例
+        provider = await self.provider_manager.get_provider_by_id(self.provider_id)
+        if provider is None:
+            raise NotImplementedError(
+                f"提供者 {self.provider_id} 不存在"
+            )
+        if not hasattr(provider, "text_chat_stream"):
+            raise NotImplementedError(
+                f"提供者 {self.provider_id} 不支持流式接口"
+            )
+
+        self.logger.info(
+            f"调用LLM流式接口: provider={self.provider_id}, chunk_timeout={self.chunk_timeout}s"
+        )
+
+        # 获取流式异步生成器
+        stream = provider.text_chat_stream(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            contexts=[],
+        )
+
+        accumulated = ""
+        try:
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(
+                        stream.__anext__(),
+                        timeout=self.chunk_timeout,
+                    )
+                except StopAsyncIteration:
+                    # 流自然结束
+                    break
+                except asyncio.TimeoutError:
+                    # 流停滞 — 清理并重新抛出
+                    await stream.aclose()
+                    raise
+
+                # 累加 chunk 文本
+                if chunk.completion_text:
+                    accumulated += chunk.completion_text
+
+                # 最后一个非 chunk 响应包含完整文本
+                if not chunk.is_chunk and chunk.completion_text:
+                    accumulated = chunk.completion_text
+
+        except GeneratorExit:
+            # 发生异常时确保关闭生成器
+            await stream.aclose()
+            raise
+
+        self.logger.info(
+            f"LLM流式调用完成: {len(accumulated)} 字符"
+        )
+        return accumulated
 
     def _get_dev_docs(self) -> str:
         """获取开发文档（带缓存）

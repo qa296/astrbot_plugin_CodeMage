@@ -47,6 +47,12 @@
     "hint": "插件生成失败时的最大重试次数，-1为无限",
     "default": 3
   },
+  "enable_streaming": {
+    "description": "启用流式传输",
+    "type": "bool",
+    "hint": "启用后通过流式调用LLM，可避免长时间生成时的连接超时问题。启用后LLM调用超时时间将无效",
+    "default": false
+  },
   "llm_timeout_seconds": {
     "description": "LLM调用超时时间(秒)",
     "type": "int",
