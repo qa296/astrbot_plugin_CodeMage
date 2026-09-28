@@ -1,3 +1,4 @@
+import os
 import re
 
 from astrbot.api import logger
@@ -79,6 +80,14 @@ repo: https://github.com/xxx/xxx
 
 ## 安全规则
 {negative_prompt}
+
+## 完成条件
+当你完成以下任一情况时，调用 finish 工具提交结果并结束任务：
+- install_plugin 返回安装成功，且你确认插件功能完整
+- 安装失败且多次修复仍无法解决（最多重试 4 次）
+
+禁止在不调用任何工具的情况下直接回复用户——这会导致任务异常中断。
+每次调用 finish 时必须传入正确的 plugin_name。
 """
 
     if allow_ask_user:
@@ -158,11 +167,19 @@ def _build_toolset_for_command(
     return toolset
 
 
-def _extract_plugin_name(llm_resp) -> str | None:
+def _extract_plugin_name(llm_resp, work_dir: str | None = None) -> str | None:
     text = getattr(llm_resp, "completion_text", "") or ""
     match = re.search(r"astrbot_plugin_[a-zA-Z0-9_]+", text)
     if match:
         return match.group(0)
+
+    if work_dir and os.path.isdir(work_dir):
+        for entry in os.listdir(work_dir):
+            if entry.startswith("astrbot_plugin_") and os.path.isdir(
+                os.path.join(work_dir, entry)
+            ):
+                return entry
+
     return None
 
 
@@ -219,11 +236,37 @@ async def run_agent_mode(
             tool_call_timeout=config.get("llm_timeout_seconds", 600),
         )
 
-        plugin_name = _extract_plugin_name(llm_resp)
+        if getattr(llm_resp, "role", "") == "err":
+            return {
+                "success": False,
+                "error": llm_resp.completion_text or "LLM 请求失败",
+            }
+
+        completion_text = getattr(llm_resp, "completion_text", "") or ""
+        if not completion_text.strip():
+            plugin_name = _extract_plugin_name(llm_resp, work_dir)
+            if plugin_name:
+                return {
+                    "success": True,
+                    "plugin_name": plugin_name,
+                    "response": "",
+                }
+            return {
+                "success": False,
+                "error": "Agent 未返回有效结果，且工作目录中未找到生成的插件",
+            }
+
+        plugin_name = _extract_plugin_name(llm_resp, work_dir)
+        if not plugin_name:
+            return {
+                "success": False,
+                "error": "Agent 未通过 finish 工具正常结束，且无法识别生成的插件名称",
+            }
+
         return {
             "success": True,
             "plugin_name": plugin_name,
-            "response": llm_resp.completion_text,
+            "response": completion_text,
         }
     except Exception as e:
         logger.error(f"Agent 模式生成插件失败: {e}")

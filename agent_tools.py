@@ -121,10 +121,48 @@ def build_ask_user_tool() -> FunctionTool:
     )
 
 
+async def _finish_handler(event, plugin_name: str, summary: str = "", **kwargs):
+    validation_error = _validate_plugin_name(plugin_name)
+    if validation_error:
+        yield f"完成失败：{validation_error}，请使用正确的插件名称重新调用 finish"
+        return
+
+    message = f"✅ 插件 {plugin_name} 生成完成"
+    if summary:
+        message += f"\n{summary}"
+    yield event.plain_result(message)
+
+
+def build_finish_tool() -> FunctionTool:
+    async def handler(event, plugin_name: str, summary: str = "", **kwargs):
+        async for r in _finish_handler(event, plugin_name, summary, **kwargs):
+            yield r
+
+    return FunctionTool(
+        name="codemage_finish",
+        parameters={
+            "type": "object",
+            "properties": {
+                "plugin_name": {
+                    "type": "string",
+                    "description": "生成的插件名称，如 astrbot_plugin_weather",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "简要总结生成结果（可选）",
+                },
+            },
+            "required": ["plugin_name"],
+        },
+        description="插件生成完成后调用此工具提交结果并结束任务。这是唯一正确的结束方式，不要在不调用工具的情况下直接回复用户。",
+        handler=handler,
+    )
+
+
 def build_custom_tools(
     installer, work_dir, allow_ask_user: bool = True
 ) -> list[FunctionTool]:
-    tools = [build_install_tool(installer, work_dir)]
+    tools = [build_install_tool(installer, work_dir), build_finish_tool()]
     if allow_ask_user:
         tools.append(build_ask_user_tool())
     return tools
