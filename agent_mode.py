@@ -11,6 +11,8 @@ from astrbot.core.provider.register import llm_tools
 
 from .agent_tools import build_custom_tools
 
+_AGENT_MAX_STEPS = 250
+
 _BUILTIN_TOOL_NAMES = [
     "astrbot_file_read_tool",
     "astrbot_file_write_tool",
@@ -213,7 +215,7 @@ async def run_agent_mode(
             prompt=description,
             system_prompt=system_prompt,
             tools=toolset,
-            max_steps=30,
+            max_steps=_AGENT_MAX_STEPS,
             tool_call_timeout=config.get("llm_timeout_seconds", 600),
         )
 
