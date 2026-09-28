@@ -4,11 +4,13 @@ CodeMage - AI驱动的AstrBot插件生成器
 """
 
 import hashlib
+import os
 from typing import Any
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
+from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 from .directory_detector import DirectoryDetector
 from .installer import PluginInstaller
@@ -35,11 +37,44 @@ class CodeMagePlugin(Star):
         )
         self.directory_detector = DirectoryDetector()
 
-        # 初始化logger
         self.logger = logger
 
-        # 验证配置
+        self._handoff = None
+        self._work_dir = None
+        self._astrbot_root = None
+
+        generation_mode = config.get("generation_mode", "pipeline")
+        if generation_mode == "agent":
+            self._init_agent_mode()
+
         self._validate_config()
+
+    def _init_agent_mode(self):
+        from .agent_mode import register_codemage_agent
+
+        self._astrbot_root = self.directory_detector.detect_astrbot_installation()
+        if not self._astrbot_root:
+            self.logger.warning("Agent 模式：未检测到 AstrBot 根目录，部分功能可能受限")
+            self._astrbot_root = os.path.realpath(os.path.join(os.getcwd()))
+
+        data_path = get_astrbot_data_path()
+        self._work_dir = os.path.join(
+            data_path, "plugin_data", "astrbot_plugin_codemage", "plugin"
+        )
+        os.makedirs(self._work_dir, exist_ok=True)
+
+        self._handoff = register_codemage_agent(
+            context=self.context,
+            config=self.config,
+            installer=self.installer,
+            work_dir=self._work_dir,
+            astrbot_root=self._astrbot_root,
+        )
+        self.logger.info("CodeMage Agent 模式已注册 SubAgent")
+
+    @property
+    def _is_agent_mode(self) -> bool:
+        return self.config.get("generation_mode", "pipeline") == "agent"
 
     def _validate_config(self):
         """验证配置文件"""
@@ -150,6 +185,29 @@ class CodeMagePlugin(Star):
 
         # 开始生成流程
         try:
+            if self._is_agent_mode:
+                from .agent_mode import run_agent_mode
+
+                yield event.plain_result("开始生成插件（Agent模式），请稍候...")
+                result = await run_agent_mode(
+                    context=self.context,
+                    config=self.config,
+                    event=event,
+                    description=plugin_description,
+                    installer=self.installer,
+                    work_dir=self._work_dir,
+                    astrbot_root=self._astrbot_root,
+                )
+                if result["success"]:
+                    yield event.plain_result(
+                        f"插件生成成功！\n插件名称：{result.get('plugin_name', '未知')}"
+                    )
+                else:
+                    yield event.plain_result(
+                        f"插件生成失败：{result.get('error', '未知错误')}"
+                    )
+                return
+
             yield event.plain_result("开始生成插件，请稍候...")
             result = await self.plugin_generator.generate_plugin_flow(
                 plugin_description, event
@@ -179,6 +237,9 @@ class CodeMagePlugin(Star):
 
     @filter.command("插件生成状态", alias={"plugin_status"})
     async def plugin_status(self, event: AstrMessageEvent):
+        if self._is_agent_mode:
+            yield event.plain_result("当前为 Agent 模式，不支持此命令")
+            return
         """查看插件生成器状态"""
         # 获取当前生成状态
         current_status = self.plugin_generator.get_current_status()
@@ -219,6 +280,18 @@ class CodeMagePlugin(Star):
             return {"error": "仅管理员可以使用此功能"}
 
         try:
+            if self._is_agent_mode:
+                from .agent_mode import run_agent_mode
+
+                return await run_agent_mode(
+                    context=self.context,
+                    config=self.config,
+                    event=event,
+                    description=plugin_description,
+                    installer=self.installer,
+                    work_dir=self._work_dir,
+                    astrbot_root=self._astrbot_root,
+                )
             result = await self.plugin_generator.generate_plugin_flow(
                 plugin_description, event
             )
@@ -248,6 +321,9 @@ class CodeMagePlugin(Star):
 
     @filter.command("同意生成", alias={"approve", "confirm"})
     async def approve_generation(self, event: AstrMessageEvent, feedback: str = ""):
+        if self._is_agent_mode:
+            yield event.plain_result("当前为 Agent 模式，不支持此命令")
+            return
         """同意插件生成指令
 
         Args:
@@ -292,6 +368,9 @@ class CodeMagePlugin(Star):
 
     @filter.command("拒绝生成", alias={"reject", "cancel"})
     async def reject_generation(self, event: AstrMessageEvent):
+        if self._is_agent_mode:
+            yield event.plain_result("当前为 Agent 模式，不支持此命令")
+            return
         """拒绝插件生成指令
 
         Args:
@@ -318,6 +397,9 @@ class CodeMagePlugin(Star):
 
     @filter.command("插件内容修改", alias={"modify_plugin", "modify"})
     async def modify_plugin_content(self, event: AstrMessageEvent):
+        if self._is_agent_mode:
+            yield event.plain_result("当前为 Agent 模式，不支持此命令")
+            return
         """选择性修改插件内容指令
 
         通过完整消息解析，支持空格。
@@ -375,6 +457,9 @@ class CodeMagePlugin(Star):
 
     @filter.command("继续生成", alias={"resume", "continue"})
     async def resume_generation(self, event: AstrMessageEvent):
+        if self._is_agent_mode:
+            yield event.plain_result("当前为 Agent 模式，不支持此命令")
+            return
         """恢复挂起的插件生成任务
 
         用法：
@@ -446,6 +531,9 @@ class CodeMagePlugin(Star):
 
     @filter.command("放弃挂起", alias={"abandon_suspended", "cancel_suspended"})
     async def abandon_suspended(self, event: AstrMessageEvent):
+        if self._is_agent_mode:
+            yield event.plain_result("当前为 Agent 模式，不支持此命令")
+            return
         """放弃指定的挂起任务
 
         用法：/放弃挂起 插件名
@@ -478,6 +566,9 @@ class CodeMagePlugin(Star):
 
     @filter.command("挂起任务", alias={"suspended_tasks", "挂起列表"})
     async def list_suspended_tasks(self, event: AstrMessageEvent):
+        if self._is_agent_mode:
+            yield event.plain_result("当前为 Agent 模式，不支持此命令")
+            return
         """查看所有挂起的插件生成任务"""
         if not self._check_admin_permission(event):
             yield event.plain_result("仅管理员可以使用此功能")
@@ -520,5 +611,9 @@ class CodeMagePlugin(Star):
             yield event.plain_result(f"查询失败：{str(e)}")
 
     async def terminate(self):
-        """插件卸载时调用"""
+        if self._handoff is not None:
+            from .agent_mode import unregister_codemage_agent
+
+            unregister_codemage_agent(self._handoff)
+            self.logger.info("CodeMage Agent 模式已注销 SubAgent")
         self.logger.info("CodeMage插件已卸载")
