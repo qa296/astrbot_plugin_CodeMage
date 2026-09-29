@@ -24,6 +24,13 @@ async def _install_handler(
     if not os.path.isdir(plugin_dir):
         return f"安装失败：插件目录不存在：{plugin_dir}"
 
+    try:
+        existing = await installer._check_plugin_loaded_via_api(plugin_name)
+        if existing.get("loaded") or existing.get("success"):
+            await installer.delete_plugin_folder(plugin_name)
+    except Exception:
+        pass
+
     installer.set_install_timestamp()
 
     zip_path = await installer.create_plugin_zip(plugin_dir)
