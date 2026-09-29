@@ -128,22 +128,17 @@ def build_ask_user_tool() -> FunctionTool:
     )
 
 
-async def _finish_handler(event, plugin_name: str, summary: str = "", **kwargs):
+async def _finish_handler(event, plugin_name: str, summary: str = "", **kwargs) -> str:
     validation_error = _validate_plugin_name(plugin_name)
     if validation_error:
-        yield f"完成失败：{validation_error}，请使用正确的插件名称重新调用 finish"
-        return
+        return f"完成失败：{validation_error}，请使用正确的插件名称重新调用 finish"
 
-    message = f"✅ 插件 {plugin_name} 生成完成"
-    if summary:
-        message += f"\n{summary}"
-    yield event.plain_result(message)
+    return "任务已完成。请不要再调用任何工具，直接向用户简要说明结果即可。"
 
 
 def build_finish_tool() -> FunctionTool:
-    async def handler(event, plugin_name: str, summary: str = "", **kwargs):
-        async for r in _finish_handler(event, plugin_name, summary, **kwargs):
-            yield r
+    async def handler(event, plugin_name: str, summary: str = "", **kwargs) -> str:
+        return await _finish_handler(event, plugin_name, summary, **kwargs)
 
     return FunctionTool(
         name="codemage_finish",
