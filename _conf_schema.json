@@ -2,7 +2,7 @@
   "generation_mode": {
     "description": "插件生成模式",
     "type": "string",
-    "hint": "pipeline为传统分步流水线，agent为AI自主决策模式（通过SubAgent调用）",
+    "hint": "pipeline为传统分步流水线，agent为AI自主决策模式",
     "options": ["pipeline", "agent"],
     "default": "agent"
   },
