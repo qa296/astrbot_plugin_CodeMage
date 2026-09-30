@@ -11,8 +11,11 @@ from typing import Any
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.star import Context, Star
+from astrbot.core.utils.astrbot_path import (
+    get_astrbot_data_path,
+    get_astrbot_plugin_path,
+)
 
-from .directory_detector import DirectoryDetector
 from .llm_handler import LLMHandler
 from .utils import create_plugin_directory, format_time, sanitize_plugin_name
 
@@ -31,7 +34,6 @@ class PluginGenerator:
         self.config = config
         self.config_path = getattr(config, "config_path", None)
         self.llm_handler = LLMHandler(context, config)
-        self.directory_detector = DirectoryDetector()
         self.installer = installer
         self.logger = logger
         self.star = star
@@ -99,32 +101,31 @@ class PluginGenerator:
         except (TypeError, ValueError):
             return 80
 
+    @staticmethod
+    def _plugin_exists(plugin_name: str) -> bool:
+        """检查同名插件是否已存在于 AstrBot 插件目录"""
+        if not plugin_name.startswith("astrbot_plugin_"):
+            plugin_name = f"astrbot_plugin_{plugin_name}"
+        return os.path.exists(os.path.join(get_astrbot_plugin_path(), plugin_name))
+
     # ---- 待确认任务持久化 ----
-    def _get_state_dir(self) -> str | None:
+    def _get_state_dir(self) -> str:
         """获取状态文件目录(data/codemage)，若不存在则尝试创建"""
-        data_dir = self.directory_detector.get_data_directory()
-        if not data_dir:
-            return None
-        state_dir = os.path.join(data_dir, "codemage")
+        state_dir = os.path.join(get_astrbot_data_path(), "codemage")
         try:
             os.makedirs(state_dir, exist_ok=True)
         except Exception:
             pass
         return state_dir
 
-    def _get_state_file_path(self) -> str | None:
+    def _get_state_file_path(self) -> str:
         """获取持久化状态文件路径"""
-        state_dir = self._get_state_dir()
-        if not state_dir:
-            return None
-        return os.path.join(state_dir, "pending_generation.json")
+        return os.path.join(self._get_state_dir(), "pending_generation.json")
 
     def _save_pending_state(self):
         """将待确认任务持久化到文件（不保存 event 对象）"""
         try:
             path = self._get_state_file_path()
-            if not path:
-                return
             # 仅保存可序列化字段
             data = {
                 "active": self.pending_generation.get("active", False),
@@ -175,7 +176,7 @@ class PluginGenerator:
         """删除持久化的待确认任务文件"""
         try:
             path = self._get_state_file_path()
-            if path and os.path.exists(path):
+            if os.path.exists(path):
                 os.remove(path)
         except Exception as e:
             self.logger.warning(f"删除待确认状态文件失败: {str(e)}")
@@ -550,7 +551,7 @@ class PluginGenerator:
         self.generation_status["start_time"] = format_time(time.time())
 
         try:
-            # 验证目录结构（根据配置选择安装方式）
+            # 选择安装方式
             install_method = self.config.get("install_method", "auto")
             restore_api_pwd = False
             saved_api_pwd = None
@@ -579,22 +580,6 @@ class PluginGenerator:
                 use_api_install = bool(
                     self.installer and self.config.get("api_password_md5")
                 )
-
-            dir_validation = self.directory_detector.validate_directory_structure()
-            if not dir_validation["valid"]:
-                if use_api_install:
-                    warn_msg = f"未检测到本地AstrBot安装目录，将使用API安装。{'; '.join(dir_validation['issues'])}"
-                    await event.send(
-                        event.plain_result(
-                            "未检测到本地AstrBot安装目录，将使用API安装插件"
-                        )
-                    )
-                    self.logger.warning(warn_msg)
-                else:
-                    message = f"目录结构验证失败：{'; '.join(dir_validation['issues'])}"
-                    await event.send(event.plain_result(message))
-                    self.logger.error(message)
-                    return {"success": False, "error": message}
 
             step_by_step = self.config.get("step_by_step", True)
             metadata: dict[str, Any] = {}
@@ -646,7 +631,7 @@ class PluginGenerator:
             self._update_status(1, plugin_name)
 
             # 检查插件是否已存在
-            if self.directory_detector.check_plugin_exists(plugin_name):
+            if self._plugin_exists(plugin_name):
                 message = f"插件 '{plugin_name}' 已存在"
                 await event.send(event.plain_result(message))
                 self.logger.warning(message)
@@ -1120,7 +1105,7 @@ class PluginGenerator:
                     )
 
                     # 检查插件是否已存在
-                    if self.directory_detector.check_plugin_exists(plugin_name):
+                    if self._plugin_exists(plugin_name):
                         message = f"插件 '{plugin_name}' 已存在"
                         await event.send(event.plain_result(message))
                         self.logger.warning(message)
@@ -2013,9 +1998,7 @@ class PluginGenerator:
         if base_dir:
             plugins_dir = base_dir
         else:
-            plugins_dir = self.directory_detector.get_plugins_directory()
-            if not plugins_dir:
-                raise ValueError("无法获取插件目录")
+            plugins_dir = get_astrbot_plugin_path()
 
         # 创建插件目录
         plugin_dir = create_plugin_directory(plugins_dir, plugin_name)
@@ -2153,7 +2136,7 @@ class PluginGenerator:
                 metadata["name"] = plugin_name
 
                 # 检查插件是否已存在
-                if self.directory_detector.check_plugin_exists(plugin_name):
+                if self._plugin_exists(plugin_name):
                     return {"success": False, "error": f"插件 '{plugin_name}' 已存在"}
                 await event.send(event.plain_result("元数据已重新生成"))
 
@@ -2191,7 +2174,7 @@ class PluginGenerator:
                 metadata["markdown"] = markdown_doc
 
                 # 检查插件是否已存在
-                if self.directory_detector.check_plugin_exists(plugin_name):
+                if self._plugin_exists(plugin_name):
                     return {"success": False, "error": f"插件 '{plugin_name}' 已存在"}
 
                 # 重新生成配置

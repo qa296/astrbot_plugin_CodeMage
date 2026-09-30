@@ -10,9 +10,8 @@ from typing import Any
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
-from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+from astrbot.core.utils.astrbot_path import get_astrbot_data_path, get_astrbot_root
 
-from .directory_detector import DirectoryDetector
 from .installer import PluginInstaller
 from .llm_handler import LLMHandler
 from .plugin_generator import PluginGenerator
@@ -35,7 +34,6 @@ class CodeMagePlugin(Star):
         self.plugin_generator = PluginGenerator(
             context, config, self.installer, star=self
         )
-        self.directory_detector = DirectoryDetector()
 
         self.logger = logger
 
@@ -52,10 +50,7 @@ class CodeMagePlugin(Star):
     def _init_agent_mode(self):
         from .agent_mode import register_codemage_agent
 
-        self._astrbot_root = self.directory_detector.detect_astrbot_installation()
-        if not self._astrbot_root:
-            self.logger.warning("Agent 模式：未检测到 AstrBot 根目录，部分功能可能受限")
-            self._astrbot_root = os.path.realpath(os.path.join(os.getcwd()))
+        self._astrbot_root = get_astrbot_root()
 
         data_path = get_astrbot_data_path()
         self._work_dir = os.path.join(
@@ -70,7 +65,6 @@ class CodeMagePlugin(Star):
             work_dir=self._work_dir,
             astrbot_root=self._astrbot_root,
         )
-        self.logger.info("CodeMage Agent 模式已注册 SubAgent")
 
     @property
     def _is_agent_mode(self) -> bool:
