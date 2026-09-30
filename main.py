@@ -166,7 +166,7 @@ class CodeMagePlugin(Star):
         """
         # 检查管理员权限
         if not self._check_admin_permission(event):
-            yield event.plain_result("⚠️ 仅管理员可以使用此功能")
+            yield event.plain_result("仅管理员可以使用此功能")
             return
 
         # 从完整消息中提取描述，避免空格被截断
@@ -216,7 +216,7 @@ class CodeMagePlugin(Star):
             if result["success"]:
                 message = f"插件生成成功！\n插件名称：{result['plugin_name']}"
                 if result.get("installed"):
-                    message += f"\n安装状态：{'✅ 已安装' if result.get('install_success') else '❌ 安装失败'}"
+                    message += f"\n安装状态：{'已安装' if result.get('install_success') else '安装失败'}"
                     if not result.get("install_success"):
                         message += (
                             f"\n安装错误：{result.get('install_error', '未知错误')}"
@@ -331,7 +331,7 @@ class CodeMagePlugin(Star):
         """
         # 检查管理员权限
         if not self._check_admin_permission(event):
-            yield event.plain_result("⚠️ 仅管理员可以使用此功能")
+            yield event.plain_result("仅管理员可以使用此功能")
             return
 
         # 获取待确认的任务
@@ -350,7 +350,7 @@ class CodeMagePlugin(Star):
             if result["success"]:
                 message = f"插件生成成功！\n插件名称：{result['plugin_name']}"
                 if result.get("installed"):
-                    message += f"\n安装状态：{'✅ 已安装' if result.get('install_success') else '❌ 安装失败'}"
+                    message += f"\n安装状态：{'已安装' if result.get('install_success') else '安装失败'}"
                     if not result.get("install_success"):
                         message += (
                             f"\n安装错误：{result.get('install_error', '未知错误')}"
@@ -378,7 +378,7 @@ class CodeMagePlugin(Star):
         """
         # 检查管理员权限
         if not self._check_admin_permission(event):
-            yield event.plain_result("⚠️ 仅管理员可以使用此功能")
+            yield event.plain_result("仅管理员可以使用此功能")
             return
 
         # 获取待确认的任务
@@ -408,7 +408,7 @@ class CodeMagePlugin(Star):
         """
         # 检查管理员权限
         if not self._check_admin_permission(event):
-            yield event.plain_result("⚠️ 仅管理员可以使用此功能")
+            yield event.plain_result("仅管理员可以使用此功能")
             return
 
         # 获取待确认的任务

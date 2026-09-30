@@ -66,7 +66,7 @@ async def _install_handler(
 async def _ask_user_handler(event: AstrMessageEvent, question: str, **kwargs) -> str:
     from astrbot.core.utils.session_waiter import SessionController, session_waiter
 
-    await event.send(event.plain_result(f"🤔 {question}"))
+    await event.send(event.plain_result(question))
 
     user_response = None
 

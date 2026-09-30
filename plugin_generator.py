@@ -975,13 +975,13 @@ class PluginGenerator:
                             return {"success": False, "error": "\n".join(error_logs)}
                     else:
                         await event.send(
-                            event.plain_result("✅ 插件已通过API安装并验证正常")
+                            event.plain_result("插件已通过API安装并验证正常")
                         )
                 else:
                     result["install_error"] = install_result.get("error", "未知错误")
                     await event.send(
                         event.plain_result(
-                            f"❌ 插件安装失败: {install_result.get('error')}"
+                            f"插件安装失败: {install_result.get('error')}"
                         )
                     )
             else:
@@ -1368,13 +1368,13 @@ class PluginGenerator:
                             return {"success": False, "error": "\n".join(error_logs)}
                     else:
                         await event.send(
-                            event.plain_result("✅ 插件已通过API安装并验证正常")
+                            event.plain_result("插件已通过API安装并验证正常")
                         )
                 else:
                     result["install_error"] = install_result.get("error", "未知错误")
                     await event.send(
                         event.plain_result(
-                            f"❌ 插件安装失败: {install_result.get('error')}"
+                            f"插件安装失败: {install_result.get('error')}"
                         )
                     )
             else:
@@ -1866,7 +1866,7 @@ class PluginGenerator:
 
                 if not status_check.get("has_errors"):
                     # 安装成功且无错误
-                    self.logger.info(f"✅ 插件安装成功且运行正常: {plugin_name}")
+                    self.logger.info(f"插件安装成功且运行正常: {plugin_name}")
                     return {
                         "success": True,
                         "plugin_path": plugin_path,  # 注意：这里返回的是临时路径，但对于API安装来说不重要
@@ -1885,7 +1885,7 @@ class PluginGenerator:
                     # 达到最大重试次数，放弃
                     await event.send(
                         event.plain_result(
-                            f"❌ 插件安装后检测到错误，且已达到最大重试次数:\n{error_msg}"
+                            f"插件安装后检测到错误，且已达到最大重试次数:\n{error_msg}"
                         )
                     )
                     return {
@@ -1900,7 +1900,7 @@ class PluginGenerator:
 
                 # 6. 尝试自动修复
                 await event.send(
-                    event.plain_result("⚠️ 检测到插件错误，正在尝试自动修复...")
+                    event.plain_result("检测到插件错误，正在尝试自动修复...")
                 )
 
                 # 删除已安装的插件

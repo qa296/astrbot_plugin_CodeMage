@@ -55,16 +55,16 @@ class PluginInstaller:
 
                     if result.get("status") == "ok":
                         self.token = result.get("data", {}).get("token")
-                        self.logger.info("✅ AstrBot API登录成功")
+                        self.logger.info("AstrBot API登录成功")
                         return True
                     else:
                         self.logger.error(
-                            f"❌ AstrBot API登录失败: {result.get('message')}"
+                            f"AstrBot API登录失败: {result.get('message')}"
                         )
                         return False
 
         except Exception as e:
-            self.logger.error(f"❌ AstrBot API登录请求失败: {str(e)}")
+            self.logger.error(f"AstrBot API登录请求失败: {str(e)}")
             return False
 
     async def create_plugin_zip(self, plugin_dir: str) -> str | None:
@@ -182,7 +182,7 @@ class PluginInstaller:
 
                         if result.get("status") == "ok":
                             self.logger.info(
-                                f"✅ 插件安装成功: {result.get('message')}"
+                                f"插件安装成功: {result.get('message')}"
                             )
                             return {
                                 "success": True,
@@ -195,7 +195,7 @@ class PluginInstaller:
                             }
                         else:
                             self.logger.error(
-                                f"❌ 插件安装失败: {result.get('message')}"
+                                f"插件安装失败: {result.get('message')}"
                             )
                             return {
                                 "success": False,
@@ -203,7 +203,7 @@ class PluginInstaller:
                             }
 
         except Exception as e:
-            self.logger.error(f"❌ 插件安装请求失败: {str(e)}")
+            self.logger.error(f"插件安装请求失败: {str(e)}")
             return {"success": False, "error": str(e)}
 
     async def uninstall_plugin_api(self, plugin_name: str) -> dict[str, Any]:
@@ -232,17 +232,17 @@ class PluginInstaller:
                     result = await resp.json()
 
                     if result.get("status") == "ok":
-                        self.logger.info(f"✅ 插件卸载成功: {plugin_name}")
+                        self.logger.info(f"插件卸载成功: {plugin_name}")
                         return {"success": True, "message": result.get("message")}
                     else:
-                        self.logger.error(f"❌ 插件卸载失败: {result.get('message')}")
+                        self.logger.error(f"插件卸载失败: {result.get('message')}")
                         return {
                             "success": False,
                             "error": result.get("message", "Unknown error"),
                         }
 
         except Exception as e:
-            self.logger.error(f"❌ 插件卸载请求失败: {str(e)}")
+            self.logger.error(f"插件卸载请求失败: {str(e)}")
             return {"success": False, "error": str(e)}
 
     async def uninstall_plugin_file(self, plugin_name: str) -> dict[str, Any]:
@@ -263,11 +263,11 @@ class PluginInstaller:
                 return {"success": False, "error": f"插件目录不存在: {plugin_path}"}
 
             remove_dir(plugin_path)
-            self.logger.info(f"✅ 插件文件删除成功: {plugin_path}")
+            self.logger.info(f"插件文件删除成功: {plugin_path}")
             return {"success": True, "message": f"插件文件已删除: {plugin_path}"}
 
         except Exception as e:
-            self.logger.error(f"❌ 插件文件删除失败: {str(e)}")
+            self.logger.error(f"插件文件删除失败: {str(e)}")
             return {"success": False, "error": str(e)}
 
     async def delete_plugin_folder(self, plugin_name: str) -> dict[str, Any]:
