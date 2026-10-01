@@ -71,10 +71,7 @@ class PluginGenerator:
         }
 
         # 初始化时尝试加载持久化的待确认任务
-        try:
-            self._load_pending_state()
-        except Exception:
-            pass
+        self._load_pending_state()
 
     def get_current_status(self) -> dict[str, Any]:
         """获取当前生成状态
@@ -555,30 +552,17 @@ class PluginGenerator:
             install_method = self.config.get("install_method", "auto")
             restore_api_pwd = False
             saved_api_pwd = None
-            if install_method == "api":
-                use_api_install = True
-                if not self.config.get("api_password_md5"):
-                    await event.send(
-                        event.plain_result(
-                            "已选择API安装，但未配置API密码(MD5)，将改为本地文件安装"
-                        )
-                    )
-                    use_api_install = False
-                    # 确保后续不走API安装分支
-                    saved_api_pwd = self.config.get("api_password_md5")
-                    self.config["api_password_md5"] = ""
-                    restore_api_pwd = True
-            elif install_method == "file":
-                use_api_install = False
+            if install_method == "file":
                 # 显式选择文件安装，避免误触发API安装
                 saved_api_pwd = self.config.get("api_password_md5")
                 if saved_api_pwd:
                     self.config["api_password_md5"] = ""
                     restore_api_pwd = True
-            else:
-                # auto 模式：如果配置了API密码则走API，否则走本地文件
-                use_api_install = bool(
-                    self.installer and self.config.get("api_password_md5")
+            elif install_method == "api" and not self.config.get("api_password_md5"):
+                await event.send(
+                    event.plain_result(
+                        "已选择API安装，但未配置API密码(MD5)，将改为本地文件安装"
+                    )
                 )
 
             step_by_step = self.config.get("step_by_step", True)
@@ -1007,19 +991,13 @@ class PluginGenerator:
         """
         # 如内存中不存在，尝试从文件恢复
         if not self.pending_generation.get("active"):
-            try:
-                self._load_pending_state()
-            except Exception:
-                pass
+            self._load_pending_state()
         return self.pending_generation.copy()
 
     def clear_pending_generation(self):
         """清除待确认的插件生成任务"""
         # 删除持久化的状态文件
-        try:
-            self._delete_pending_state()
-        except Exception:
-            pass
+        self._delete_pending_state()
         self.pending_generation = {
             "active": False,
             "metadata": {},
@@ -1051,10 +1029,7 @@ class PluginGenerator:
         """
         if not self.pending_generation["active"]:
             # 尝试从文件恢复
-            try:
-                self._load_pending_state()
-            except Exception:
-                pass
+            self._load_pending_state()
         if not self.pending_generation["active"]:
             return {"success": False, "error": "没有待确认的插件生成任务"}
 
@@ -1162,9 +1137,6 @@ class PluginGenerator:
                         "已选择API安装，但未配置API密码(MD5)，将改为本地文件安装"
                     )
                 )
-                saved_api_pwd2 = self.config.get("api_password_md5")
-                self.config["api_password_md5"] = ""
-                restore_api_pwd2 = True
 
             # 步骤4：生成插件代码
             self.logger.info(f"开始生成插件代码: {plugin_name}")
@@ -1677,6 +1649,12 @@ class PluginGenerator:
                 if saved_api_pwd:
                     self.config["api_password_md5"] = ""
                     restore_api_pwd = True
+            elif install_method == "api" and not self.config.get("api_password_md5"):
+                await event.send(
+                    event.plain_result(
+                        "已选择API安装，但未配置API密码(MD5)，将改为本地文件安装"
+                    )
+                )
 
             result = {
                 "success": True,
@@ -2031,7 +2009,7 @@ class PluginGenerator:
             if isinstance(metadata_content, dict)
             else []
         )
-        if dependencies and self.config.get("allow_dependencies", True):
+        if dependencies and self.config.get("allow_dependencies", False):
             requirements_path = os.path.join(plugin_dir, "requirements.txt")
             with open(requirements_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(dependencies))
@@ -2083,10 +2061,7 @@ class PluginGenerator:
             Dict[str, Any]: 修改结果
         """
         if not self.pending_generation["active"]:
-            try:
-                self._load_pending_state()
-            except Exception:
-                pass
+            self._load_pending_state()
         if not self.pending_generation["active"]:
             return {"success": False, "error": "没有待确认的插件生成任务"}
 
@@ -2200,10 +2175,7 @@ class PluginGenerator:
                 }
             )
             # 持久化更新后的任务状态
-            try:
-                self._save_pending_state()
-            except Exception:
-                pass
+            self._save_pending_state()
 
             # 显示更新后的方案（仅元数据信息），并以图片发送文档与配置
             await event.send(

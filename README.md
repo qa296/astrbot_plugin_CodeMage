@@ -58,6 +58,7 @@ git clone https://github.com/qa296/astrbot_plugin_codemage.git
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
+| `generation_mode` | 插件生成模式，`pipeline` 为分步流水线，`agent` 为 AI 自主决策模式 | `agent` |
 | `llm_provider_id` | LLM提供商ID，需要在AstrBot中配置 | 无 |
 | `admin_only` | 是否限制只有管理员才能使用插件生成功能 | `true` |
 | `negative_prompt` | 反向提示词，禁止生成的内容规则 | 见默认值 |
@@ -66,8 +67,11 @@ git clone https://github.com/qa296/astrbot_plugin_codemage.git
 | `satisfaction_threshold` | 插件审查通过的最低满意度分数（0-100） | `80` |
 | `strict_review` | 是否启用严格审查模式 | `true` |
 | `max_retries` | 插件生成失败时的最大重试次数 | `3` |
+| `enable_streaming` | 是否用流式调用 LLM，可避免长时间生成时连接超时；启用后 `llm_timeout_seconds` 将失效 | `false` |
+| `llm_timeout_seconds` | LLM 调用的最大等待时间（秒） | `600` |
 | `enable_function_call` | 是否允许通过LLM函数调用生成插件 | `true` |
 | `allow_dependencies` | 是否允许生成的插件包含外部依赖 | `false` |
+| `install_method` | 插件安装方式，`api` 走 AstrBot API，`file` 直接写入本地插件目录（需配置用户名与密码才能用 `api`） | `auto` |
 | `astrbot_url` | AstrBot的API地址，用于安装插件 | `http://localhost:6185` |
 | `api_username` | AstrBot API的登录用户名 | `astrbot` |
 | `api_password_md5` | AstrBot API的登录密码（MD5加密） | 空 |

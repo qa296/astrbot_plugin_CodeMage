@@ -41,7 +41,7 @@ class CodeMagePlugin(Star):
         self._work_dir = None
         self._astrbot_root = None
 
-        generation_mode = config.get("generation_mode", "pipeline")
+        generation_mode = config.get("generation_mode", "agent")
         if generation_mode == "agent":
             self._init_agent_mode()
 
@@ -68,7 +68,7 @@ class CodeMagePlugin(Star):
 
     @property
     def _is_agent_mode(self) -> bool:
-        return self.config.get("generation_mode", "pipeline") == "agent"
+        return self.config.get("generation_mode", "agent") == "agent"
 
     def _validate_config(self):
         """验证配置文件"""
