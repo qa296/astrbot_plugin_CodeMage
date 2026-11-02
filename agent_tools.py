@@ -1,4 +1,5 @@
 import os
+import time as _time
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent
@@ -136,6 +137,104 @@ async def _finish_handler(event, plugin_name: str, summary: str = "", **kwargs) 
     return "任务已完成。请不要再调用任何工具，直接向用户简要说明结果即可。"
 
 
+async def _get_logs_handler(
+    event, installer, plugin_name: str = "", level: str = "", count: int = 50
+) -> str:
+    count = min(int(count or 50), 200)
+    if count < 1:
+        count = 50
+
+    if not installer.token and not await installer.login():
+        return "获取日志失败：AstrBot API 登录失败，请检查 astrbot_url/api_username/api_password_md5 配置"
+
+    try:
+        import aiohttp
+
+        headers = {"Authorization": f"Bearer {installer.token}"}
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{installer.astrbot_url}/api/log-history", headers=headers
+            ) as resp:
+                api_result = await resp.json()
+        if api_result.get("status") != "ok":
+            return f"获取日志失败：{api_result.get('message', '未知错误')}"
+        logs = api_result.get("data", {}).get("logs", [])
+    except Exception as e:
+        return f"获取日志失败：{str(e)}"
+
+    entries = []
+    for entry in logs if isinstance(logs, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        msg_data = entry.get("data", "")
+        message = (
+            str(msg_data.get("message", ""))
+            if isinstance(msg_data, dict)
+            else str(msg_data)
+        )
+        entries.append(
+            {
+                "time": entry.get("time", 0),
+                "level": str(entry.get("level", "")).upper(),
+                "message": message,
+            }
+        )
+
+    if plugin_name:
+        entries = [e for e in entries if plugin_name in e["message"]]
+    if level:
+        entries = [e for e in entries if e["level"] == str(level).upper()]
+
+    entries.sort(key=lambda x: x["time"], reverse=True)
+    entries = entries[:count]
+    if not entries:
+        return "未找到符合条件的日志。"
+
+    return "\n".join(
+        f"[{_time.strftime('%m-%d %H:%M:%S', _time.localtime(e['time']))}]"
+        f" [{e['level']}] {e['message']}"
+        for e in entries
+    )
+
+
+def build_get_logs_tool(installer) -> FunctionTool:
+    async def handler(
+        event, plugin_name: str = "", level: str = "", count: int = 50, **kwargs
+    ) -> str:
+        return await _get_logs_handler(
+            event,
+            installer=installer,
+            plugin_name=plugin_name,
+            level=level,
+            count=count,
+        )
+
+    return FunctionTool(
+        name="codemage_get_logs",
+        parameters={
+            "type": "object",
+            "properties": {
+                "plugin_name": {
+                    "type": "string",
+                    "description": "可选，只返回包含此插件名的日志",
+                },
+                "level": {
+                    "type": "string",
+                    "enum": ["ERROR", "WARNING", "INFO"],
+                    "description": "可选，日志级别过滤",
+                },
+                "count": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "返回最近日志条数，默认 50",
+                },
+            },
+        },
+        description="获取 AstrBot 运行日志。安装插件报错或插件运行时异常时，用于查看完整日志诊断问题。",
+        handler=handler,
+    )
+
+
 def build_finish_tool() -> FunctionTool:
     async def handler(event, plugin_name: str, summary: str = "", **kwargs) -> str:
         return await _finish_handler(event, plugin_name, summary, **kwargs)
@@ -164,7 +263,11 @@ def build_finish_tool() -> FunctionTool:
 def build_custom_tools(
     installer, work_dir, allow_ask_user: bool = True
 ) -> list[FunctionTool]:
-    tools = [build_install_tool(installer, work_dir), build_finish_tool()]
+    tools = [
+        build_install_tool(installer, work_dir),
+        build_get_logs_tool(installer),
+        build_finish_tool(),
+    ]
     if allow_ask_user:
         tools.append(build_ask_user_tool())
     return tools

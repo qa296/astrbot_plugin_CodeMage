@@ -56,6 +56,7 @@ xxx 由你根据功能命名，必须以 astrbot_plugin_ 开头
 4. 按需写 _conf_schema.json、README.md
 5. install_plugin 安装（内含错误检查）
 6. 如安装失败或报错 → 分析错误信息 → 修复代码 → 重新安装
+   错误信息不足时，用 get_logs 查看完整日志辅助诊断
 
 你可以根据实际情况调整顺序、跳过不需要的步骤、或多次迭代修复。
 
