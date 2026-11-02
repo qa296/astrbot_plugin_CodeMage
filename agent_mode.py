@@ -10,6 +10,13 @@ from astrbot.core.agent.tool import FunctionTool, ToolSet
 from astrbot.core.astr_agent_tool_exec import FunctionToolExecutor
 from astrbot.core.provider.register import llm_tools
 
+try:
+    from astrbot.core.tools.web_search_tools import (
+        normalize_legacy_web_search_config,
+    )
+except ImportError:
+    normalize_legacy_web_search_config = None
+
 from .agent_tools import build_custom_tools
 
 _AGENT_MAX_STEPS = 250
@@ -20,6 +27,49 @@ _BUILTIN_TOOL_NAMES = [
     "astrbot_file_edit_tool",
     "astrbot_grep_tool",
 ]
+
+_WEB_SEARCH_PROVIDER_TOOL_NAMES = {
+    "tavily": ["web_search_tavily", "tavily_extract_web_page"],
+    "bocha": ["web_search_bocha"],
+    "brave": ["web_search_brave"],
+    "firecrawl": ["web_search_firecrawl", "firecrawl_extract_web_page"],
+    "baidu_ai_search": ["web_search_baidu"],
+}
+
+_WEB_SEARCH_KEY_FIELDS = {
+    "tavily": "websearch_tavily_key",
+    "bocha": "websearch_bocha_key",
+    "brave": "websearch_brave_key",
+    "firecrawl": "websearch_firecrawl_key",
+    "baidu_ai_search": "websearch_baidu_app_builder_key",
+}
+
+
+def _resolve_web_search_tools(
+    context: Context, umo: str | None = None
+) -> list[FunctionTool]:
+    tools: list[FunctionTool] = []
+    if normalize_legacy_web_search_config is None:
+        return tools
+    try:
+        cfg = context.get_config(umo=umo)
+        normalize_legacy_web_search_config(cfg)
+        provider_settings = cfg.get("provider_settings", {})
+        if not provider_settings.get("web_search", False):
+            return tools
+        provider = provider_settings.get("websearch_provider", "tavily")
+        key_field = _WEB_SEARCH_KEY_FIELDS.get(provider)
+        if key_field and not provider_settings.get(key_field):
+            return tools
+        tool_mgr = context.get_llm_tool_manager()
+        for name in _WEB_SEARCH_PROVIDER_TOOL_NAMES.get(provider, []):
+            try:
+                tools.append(tool_mgr.get_builtin_tool(name))
+            except Exception:
+                pass
+    except Exception as e:
+        logger.debug(f"Web search tools unavailable: {e}")
+    return tools
 
 
 def _build_system_prompt(
@@ -125,7 +175,8 @@ def register_codemage_agent(
     custom_tools = build_custom_tools(
         installer, work_dir, allow_ask_user=not auto_approve
     )
-    tools = list(_BUILTIN_TOOL_NAMES) + custom_tools
+    web_tools = _resolve_web_search_tools(context)
+    tools = list(_BUILTIN_TOOL_NAMES) + web_tools + custom_tools
 
     agent = Agent(name="codemage", instructions=system_prompt, tools=tools)
     handoff = HandoffTool(agent=agent)
@@ -163,6 +214,8 @@ def _build_toolset_for_command(
     for name in _BUILTIN_TOOL_NAMES:
         if name in runtime_tools:
             toolset.add_tool(runtime_tools[name])
+    for tool in _resolve_web_search_tools(context, event.unified_msg_origin):
+        toolset.add_tool(tool)
     for tool in custom_tools:
         toolset.add_tool(tool)
 
