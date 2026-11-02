@@ -51,7 +51,7 @@ async def _install_handler(
         if not status_result.get("loaded", True):
             return f"安装成功，但插件未能加载：{status_result.get('error', '未知错误')}"
 
-        return "安装成功，插件已正常加载运行。"
+        return "插件已加载运行。"
     except Exception as e:
         logger.error(f"安装插件时发生错误: {e}")
         return f"安装失败：{str(e)}"
