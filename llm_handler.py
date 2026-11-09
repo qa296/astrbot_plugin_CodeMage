@@ -30,13 +30,13 @@ class LLMHandler:
         self.timeout_seconds = config.get("llm_timeout_seconds", 600)
         self.enable_streaming = config.get("enable_streaming", False)
         self.chunk_timeout = 60  # 流式模式下每个 chunk 的超时秒数
+        self.logger = logger
         try:
             self.provider_manager = context.provider_manager
         except AttributeError:
             self.provider_manager = None
             self.logger.warning("当前AstrBot版本不暴露provider_manager，流式模式不可用")
             self.enable_streaming = False
-        self.logger = logger
         self._dev_docs_cache: str | None = None
 
     async def call_llm(

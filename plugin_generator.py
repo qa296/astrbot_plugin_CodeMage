@@ -107,8 +107,10 @@ class PluginGenerator:
 
     # ---- 待确认任务持久化 ----
     def _get_state_dir(self) -> str:
-        """获取状态文件目录(data/codemage)，若不存在则尝试创建"""
-        state_dir = os.path.join(get_astrbot_data_path(), "codemage")
+        """获取状态文件目录(data/plugin_data/astrbot_plugin_codemage)，若不存在则尝试创建"""
+        state_dir = os.path.join(
+            get_astrbot_data_path(), "plugin_data", "astrbot_plugin_codemage"
+        )
         try:
             os.makedirs(state_dir, exist_ok=True)
         except Exception:
